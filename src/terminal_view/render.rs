@@ -1,5 +1,5 @@
 use super::scrollbar as terminal_scrollbar;
-use super::tabs::TabDropMarkerSide;
+use super::tabs::{TabDropMarkerSide, TabStripOverflowState};
 use super::*;
 use crate::ui::scrollbar::{self as ui_scrollbar, ScrollbarPaintStyle};
 
@@ -366,6 +366,7 @@ impl TerminalView {
             .on_mouse_down(
                 MouseButton::Left,
                 cx.listener(|this, _event: &MouseDownEvent, _window, cx| {
+                    this.titlebar_move_armed = false;
                     this.add_tab(cx);
                     cx.stop_propagation();
                 }),
@@ -531,6 +532,7 @@ impl Render for TerminalView {
 
         let focus_handle = self.focus_handle.clone();
         let show_tab_bar = self.show_tab_bar();
+        let tabs_in_titlebar = self.tabs_in_titlebar();
         let tabbar_action_rail_width = if show_tab_bar {
             TABBAR_ACTION_RAIL_WIDTH
         } else {
@@ -538,6 +540,11 @@ impl Render for TerminalView {
         };
         let tab_strip_viewport_width = self.tab_strip_drag_viewport_width(window);
         self.sync_tab_display_widths_for_viewport(tab_strip_viewport_width);
+        let tab_strip_overflow_state = if show_tab_bar {
+            self.tab_strip_overflow_state()
+        } else {
+            TabStripOverflowState::default()
+        };
         let titlebar_left_padding = if cfg!(target_os = "macos") {
             TOP_STRIP_MACOS_TRAFFIC_LIGHT_PADDING
         } else {
@@ -588,6 +595,12 @@ impl Render for TerminalView {
         tabbar_new_tab_text.a = 0.9;
         let mut tabbar_new_tab_hover_text = colors.cursor;
         tabbar_new_tab_hover_text.a = 0.98;
+        let mut tab_overflow_fade_soft = tabbar_bg;
+        tab_overflow_fade_soft.a = self.scaled_chrome_alpha(0.18);
+        let mut tab_overflow_fade_mid = tabbar_bg;
+        tab_overflow_fade_mid.a = self.scaled_chrome_alpha(0.28);
+        let mut tab_overflow_fade_strong = tabbar_bg;
+        tab_overflow_fade_strong.a = self.scaled_chrome_alpha(0.38);
         let mut selection_bg = colors.cursor;
         selection_bg.a = SELECTION_BG_ALPHA;
         let selection_fg = colors.background;
@@ -643,8 +656,8 @@ impl Render for TerminalView {
                 let hovered_changed =
                     this.hovered_tab.take().is_some() || this.hovered_tab_close.take().is_some();
                 let drag_changed = if event.dragging() {
-                    let viewport_width = this.tab_strip_drag_viewport_width(window);
-                    let pointer_x = Into::<f32>::into(event.position.x).clamp(0.0, viewport_width);
+                    let (pointer_x, viewport_width) =
+                        this.tab_strip_pointer_x_from_window_x(window, event.position.x);
                     this.update_tab_drag_preview(pointer_x, viewport_width, cx)
                 } else {
                     if this.tab_drag.is_some() {
@@ -731,6 +744,7 @@ impl Render for TerminalView {
                     .on_mouse_down(
                         MouseButton::Left,
                         cx.listener(move |this, _event: &MouseDownEvent, _window, cx| {
+                            this.titlebar_move_armed = false;
                             let is_active = close_tab_index == this.active_tab;
                             if Self::tab_shows_close(
                                 is_active,
@@ -780,6 +794,7 @@ impl Render for TerminalView {
                     .on_mouse_down(
                         MouseButton::Left,
                         cx.listener(move |this, event: &MouseDownEvent, _window, cx| {
+                            this.titlebar_move_armed = false;
                             this.switch_tab(switch_tab_index, cx);
                             this.begin_tab_drag(switch_tab_index);
                             if event.click_count == 2 {
@@ -800,9 +815,8 @@ impl Render for TerminalView {
                                 hovered_changed = true;
                             }
                             let drag_changed = if event.dragging() {
-                                let viewport_width = this.tab_strip_drag_viewport_width(window);
-                                let pointer_x =
-                                    Into::<f32>::into(event.position.x).clamp(0.0, viewport_width);
+                                let (pointer_x, viewport_width) = this
+                                    .tab_strip_pointer_x_from_window_x(window, event.position.x);
                                 this.update_tab_drag_preview(pointer_x, viewport_width, cx)
                             } else {
                                 false
@@ -905,6 +919,81 @@ impl Render for TerminalView {
             .map_or(TABBAR_HEIGHT - TAB_STROKE_THICKNESS, |layout| {
                 layout.baseline_y
             });
+        let left_overflow_indicator = (show_tab_bar && tab_strip_overflow_state.left).then(|| {
+            div()
+                .id("tabs-overflow-left")
+                .absolute()
+                .top_0()
+                .left_0()
+                .bottom_0()
+                .w(px(9.0))
+                .child(
+                    div()
+                        .absolute()
+                        .left_0()
+                        .top_0()
+                        .bottom_0()
+                        .w(px(3.0))
+                        .bg(tab_overflow_fade_strong),
+                )
+                .child(
+                    div()
+                        .absolute()
+                        .left(px(3.0))
+                        .top_0()
+                        .bottom_0()
+                        .w(px(3.0))
+                        .bg(tab_overflow_fade_mid),
+                )
+                .child(
+                    div()
+                        .absolute()
+                        .left(px(6.0))
+                        .top_0()
+                        .bottom_0()
+                        .w(px(3.0))
+                        .bg(tab_overflow_fade_soft),
+                )
+                .into_any_element()
+        });
+        let right_overflow_indicator =
+            (show_tab_bar && tab_strip_overflow_state.right).then(|| {
+                div()
+                    .id("tabs-overflow-right")
+                    .absolute()
+                    .top_0()
+                    .right_0()
+                    .bottom_0()
+                    .w(px(9.0))
+                    .child(
+                        div()
+                            .absolute()
+                            .right_0()
+                            .top_0()
+                            .bottom_0()
+                            .w(px(3.0))
+                            .bg(tab_overflow_fade_strong),
+                    )
+                    .child(
+                        div()
+                            .absolute()
+                            .right(px(3.0))
+                            .top_0()
+                            .bottom_0()
+                            .w(px(3.0))
+                            .bg(tab_overflow_fade_mid),
+                    )
+                    .child(
+                        div()
+                            .absolute()
+                            .right(px(6.0))
+                            .top_0()
+                            .bottom_0()
+                            .w(px(3.0))
+                            .bg(tab_overflow_fade_soft),
+                    )
+                    .into_any_element()
+            });
 
         let tabs_row = div()
             .w_full()
@@ -922,7 +1011,10 @@ impl Render for TerminalView {
                             .flex_1()
                             .min_w(px(0.0))
                             .h_full()
-                            .child(tabs_scroll_content),
+                            .relative()
+                            .child(tabs_scroll_content)
+                            .children(left_overflow_indicator)
+                            .children(right_overflow_indicator),
                     )
                     .children(show_tab_bar.then(|| {
                         div()
@@ -945,9 +1037,11 @@ impl Render for TerminalView {
                                         return;
                                     }
 
-                                    let viewport_width = this.tab_strip_drag_viewport_width(window);
-                                    let pointer_x = Into::<f32>::into(event.position.x)
-                                        .clamp(0.0, viewport_width);
+                                    let (pointer_x, viewport_width) = this
+                                        .tab_strip_pointer_x_from_window_x(
+                                            window,
+                                            event.position.x,
+                                        );
                                     if !this.update_tab_drag_preview(pointer_x, viewport_width, cx)
                                         && hovered_changed
                                     {
@@ -1060,29 +1154,39 @@ impl Render for TerminalView {
         } else {
             "Terminal"
         };
-        let titlebar_element: Option<AnyElement> = (titlebar_height > 0.0).then(|| {
-            div()
+        let tabs_row = tabs_row.into_any_element();
+        let (titlebar_element, standalone_tabbar_element): (
+            Option<AnyElement>,
+            Option<AnyElement>,
+        ) = if titlebar_height > 0.0 {
+            let titlebar_container = div()
                 .id("titlebar")
                 .w_full()
                 .h(px(titlebar_height))
                 .flex_none()
+                .relative()
                 .flex()
                 .items_center()
-                .window_control_area(WindowControlArea::Drag)
                 .on_mouse_down(
                     MouseButton::Left,
-                    cx.listener(Self::handle_titlebar_mouse_down),
+                    cx.listener(|this, _event: &MouseDownEvent, _window, _cx| {
+                        this.titlebar_move_armed = false;
+                    }),
                 )
                 .on_mouse_move(cx.listener(|this, event: &MouseMoveEvent, window, cx| {
+                    if this.maybe_start_titlebar_window_move(event.dragging(), window) {
+                        cx.stop_propagation();
+                        return;
+                    }
+
                     let mut changed = false;
                     if this.hovered_tab.take().is_some() || this.hovered_tab_close.take().is_some()
                     {
                         changed = true;
                     }
                     if event.dragging() {
-                        let viewport_width = this.tab_strip_drag_viewport_width(window);
-                        let pointer_x =
-                            Into::<f32>::into(event.position.x).clamp(0.0, viewport_width);
+                        let (pointer_x, viewport_width) =
+                            this.tab_strip_pointer_x_from_window_x(window, event.position.x);
                         if !this.update_tab_drag_preview(pointer_x, viewport_width, cx) && changed {
                             cx.notify();
                         }
@@ -1095,45 +1199,115 @@ impl Render for TerminalView {
                         cx.notify();
                     }
                 }))
-                .bg(titlebar_bg)
-                .child(
-                    div()
-                        .w_full()
-                        .flex()
-                        .items_center()
-                        .mt(px(TOP_STRIP_CONTENT_OFFSET_Y))
-                        .gap(px(8.0))
-                        .pl(px(titlebar_left_padding))
-                        .pr(px(TOP_STRIP_SIDE_PADDING))
-                        .child(
-                            div()
-                                .flex_1()
-                                .flex()
-                                .items_center()
-                                .gap(px(10.0))
-                                .overflow_x_hidden()
-                                .child(
-                                    div()
-                                        .mt(px(TOP_STRIP_TEXT_BASELINE_NUDGE_Y))
-                                        .text_color(titlebar_brand_text)
-                                        .text_size(px(TOP_STRIP_BRAND_TEXT_SIZE))
-                                        .font_weight(FontWeight::MEDIUM)
-                                        .child("termy"),
-                                )
-                                .child(
-                                    div()
-                                        .mt(px(TOP_STRIP_TEXT_BASELINE_NUDGE_Y))
-                                        .flex_1()
-                                        .overflow_x_hidden()
-                                        .truncate()
-                                        .text_color(titlebar_context_text)
-                                        .text_size(px(TOP_STRIP_CONTEXT_TEXT_SIZE))
-                                        .child(active_context_label),
-                                ),
-                        ),
+                .bg(titlebar_bg);
+
+            if tabs_in_titlebar {
+                (
+                    Some(
+                        titlebar_container
+                            .on_mouse_down(
+                                MouseButton::Left,
+                                cx.listener(Self::handle_unified_titlebar_mouse_down),
+                            )
+                            .on_mouse_up(
+                                MouseButton::Left,
+                                cx.listener(Self::handle_unified_titlebar_mouse_up),
+                            )
+                            .on_mouse_up_out(
+                                MouseButton::Left,
+                                cx.listener(Self::handle_unified_titlebar_mouse_up),
+                            )
+                            .child(
+                                div()
+                                    .w_full()
+                                    .h_full()
+                                    .flex()
+                                    .items_end()
+                                    .mt(px(TOP_STRIP_CONTENT_OFFSET_Y))
+                                    .pl(px(titlebar_left_padding))
+                                    .pr(px(TOP_STRIP_SIDE_PADDING))
+                                    .child(div().flex_1().h_full().child(tabs_row)),
+                            )
+                            .into_any(),
+                    ),
+                    None,
                 )
-                .into_any()
-        });
+            } else {
+                (
+                    Some(
+                        titlebar_container
+                            .window_control_area(WindowControlArea::Drag)
+                            .on_mouse_down(
+                                MouseButton::Left,
+                                cx.listener(Self::handle_titlebar_mouse_down),
+                            )
+                            .child(
+                                div()
+                                    .w_full()
+                                    .flex()
+                                    .items_center()
+                                    .mt(px(TOP_STRIP_CONTENT_OFFSET_Y))
+                                    .gap(px(8.0))
+                                    .pl(px(titlebar_left_padding))
+                                    .pr(px(TOP_STRIP_SIDE_PADDING))
+                                    .child(
+                                        div()
+                                            .flex_1()
+                                            .flex()
+                                            .items_center()
+                                            .gap(px(10.0))
+                                            .overflow_x_hidden()
+                                            .child(
+                                                div()
+                                                    .mt(px(TOP_STRIP_TEXT_BASELINE_NUDGE_Y))
+                                                    .text_color(titlebar_brand_text)
+                                                    .text_size(px(TOP_STRIP_BRAND_TEXT_SIZE))
+                                                    .font_weight(FontWeight::MEDIUM)
+                                                    .child("termy"),
+                                            )
+                                            .child(
+                                                div()
+                                                    .mt(px(TOP_STRIP_TEXT_BASELINE_NUDGE_Y))
+                                                    .flex_1()
+                                                    .overflow_x_hidden()
+                                                    .truncate()
+                                                    .text_color(titlebar_context_text)
+                                                    .text_size(px(TOP_STRIP_CONTEXT_TEXT_SIZE))
+                                                    .child(active_context_label),
+                                            ),
+                                    ),
+                            )
+                            .into_any(),
+                    ),
+                    Some(
+                        div()
+                            .id("tabbar")
+                            .w_full()
+                            .h(px(self.tab_bar_height()))
+                            .flex_none()
+                            .overflow_hidden()
+                            .bg(tabbar_bg)
+                            .child(tabs_row)
+                            .into_any_element(),
+                    ),
+                )
+            }
+        } else {
+            (
+                None,
+                Some(
+                    div()
+                        .id("tabbar")
+                        .w_full()
+                        .h(px(self.tab_bar_height()))
+                        .flex_none()
+                        .overflow_hidden()
+                        .bg(tabbar_bg)
+                        .child(tabs_row)
+                        .into_any_element(),
+                ),
+            )
+        };
         let toast_overlay = if self.toast_manager.active().is_empty() {
             None
         } else {
@@ -1370,26 +1544,21 @@ impl Render for TerminalView {
             .bg(root_bg)
             .capture_any_mouse_up(cx.listener(|this, event: &MouseUpEvent, _window, cx| {
                 if event.button == MouseButton::Left {
+                    this.titlebar_move_armed = false;
+                }
+                if event.button == MouseButton::Left {
                     this.commit_tab_drag(cx);
                 }
             }))
             .on_mouse_up_out(
                 MouseButton::Left,
                 cx.listener(|this, _event: &MouseUpEvent, _window, cx| {
+                    this.titlebar_move_armed = false;
                     this.commit_tab_drag(cx);
                 }),
             )
             .children(titlebar_element)
-            .child(
-                div()
-                    .id("tabbar")
-                    .w_full()
-                    .h(px(self.tab_bar_height()))
-                    .flex_none()
-                    .overflow_hidden()
-                    .bg(tabbar_bg)
-                    .child(tabs_row),
-            )
+            .children(standalone_tabbar_element)
             .children(banner_element)
             .child(
                 div()

@@ -139,8 +139,10 @@ Explicit payload examples:
 `use_tabs`
 - Default: `true`
 - Values: `true`/`false`
-- What it does: shows Termy's compact tab strip. When enabled, the tab strip stays visible even with a single tab.
+- What it does: shows Termy's compact tab strip. When enabled, the tab strip stays visible even with a single tab. On macOS, the tab strip is integrated into the titlebar to recover vertical space. On Windows/Linux, the tab strip remains a separate row below the titlebar.
 - Tab behavior: tab widths are content-based with an adaptive max width when few tabs are open, the row scrolls horizontally when tabs overflow, long path-like titles are middle-squeezed (for example `~/Desktop/.../docs`) when needed, and close buttons appear on the active or hovered tab.
+- Unified titlebar drag behavior (macOS): in unified mode, tab bodies stay dedicated to tab reordering. Window move is available from any non-interactive titlebar space (outside tab bodies and tab action controls).
+- Note (macOS): changing `use_tabs` updates layout immediately, but native window movability mode is decided at window creation; restart Termy if drag behavior does not update right away.
 
 `warn_on_quit_with_running_process`
 - Default: `true`

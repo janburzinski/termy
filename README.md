@@ -57,6 +57,16 @@ Run the installer and follow the setup wizard.
 cargo run --release
 ```
 
+### Formatting workflow (for contributors)
+
+Use scoped formatting on files you touched to keep PRs reviewable:
+
+```sh
+just fmt src/main.rs src/terminal_view/render.rs
+```
+
+If we ever do a repo-wide formatting pass, it should be a separate dedicated PR.
+
 ## Configuration
 
 Config file: `~/.config/termy/config.txt`

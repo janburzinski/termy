@@ -6,7 +6,25 @@ pub(super) enum TabDropMarkerSide {
     Right,
 }
 
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(super) struct TabStripOverflowState {
+    pub(super) left: bool,
+    pub(super) right: bool,
+}
+
 impl TerminalView {
+    fn tab_strip_origin_x(&self) -> f32 {
+        if !self.tabs_in_titlebar() {
+            return 0.0;
+        }
+
+        if cfg!(target_os = "macos") {
+            TOP_STRIP_MACOS_TRAFFIC_LIGHT_PADDING
+        } else {
+            TOP_STRIP_SIDE_PADDING
+        }
+    }
+
     fn clear_tab_drag_preview_state(&mut self) {
         self.tab_drag_pointer_x = None;
         self.tab_drag_viewport_width = 0.0;
@@ -65,7 +83,53 @@ impl TerminalView {
             return viewport_width.max(0.0);
         }
 
-        (viewport_width - TABBAR_ACTION_RAIL_WIDTH).max(0.0)
+        let tabs_row_width = if self.tabs_in_titlebar() {
+            (viewport_width - self.tab_strip_origin_x() - TOP_STRIP_SIDE_PADDING).max(0.0)
+        } else {
+            viewport_width.max(0.0)
+        };
+
+        (tabs_row_width - TABBAR_ACTION_RAIL_WIDTH).max(0.0)
+    }
+
+    pub(super) fn tab_strip_pointer_x_from_window_x(
+        &self,
+        window: &Window,
+        window_x: Pixels,
+    ) -> (f32, f32) {
+        let viewport_width = self.tab_strip_drag_viewport_width(window);
+        let pointer_x =
+            (Into::<f32>::into(window_x) - self.tab_strip_origin_x()).clamp(0.0, viewport_width);
+        (pointer_x, viewport_width)
+    }
+
+    fn tab_strip_overflow_state_for_scroll(
+        scroll_x: f32,
+        max_scroll_x: f32,
+    ) -> TabStripOverflowState {
+        const OVERFLOW_EPSILON: f32 = 0.5;
+
+        let max_scroll = max_scroll_x.max(0.0);
+        if max_scroll <= OVERFLOW_EPSILON {
+            return TabStripOverflowState::default();
+        }
+
+        let clamped_scroll = scroll_x.clamp(0.0, max_scroll);
+        TabStripOverflowState {
+            left: clamped_scroll > OVERFLOW_EPSILON,
+            right: (max_scroll - clamped_scroll) > OVERFLOW_EPSILON,
+        }
+    }
+
+    pub(super) fn tab_strip_overflow_state(&self) -> TabStripOverflowState {
+        if !self.show_tab_bar() {
+            return TabStripOverflowState::default();
+        }
+
+        let offset = self.tab_strip_scroll_handle.offset();
+        let scroll_x = -Into::<f32>::into(offset.x);
+        let max_scroll: f32 = self.tab_strip_scroll_handle.max_offset().width.into();
+        Self::tab_strip_overflow_state_for_scroll(scroll_x, max_scroll)
     }
 
     pub(super) fn effective_tab_max_width_for_viewport(
@@ -728,6 +792,47 @@ mod tests {
                 0.0,
             ),
             1
+        );
+    }
+
+    #[test]
+    fn tab_strip_overflow_state_reports_none_without_scroll_range() {
+        assert_eq!(
+            TerminalView::tab_strip_overflow_state_for_scroll(0.0, 0.0),
+            TabStripOverflowState::default()
+        );
+    }
+
+    #[test]
+    fn tab_strip_overflow_state_reports_right_overflow_at_start() {
+        assert_eq!(
+            TerminalView::tab_strip_overflow_state_for_scroll(0.0, 120.0),
+            TabStripOverflowState {
+                left: false,
+                right: true,
+            }
+        );
+    }
+
+    #[test]
+    fn tab_strip_overflow_state_reports_left_overflow_at_end() {
+        assert_eq!(
+            TerminalView::tab_strip_overflow_state_for_scroll(120.0, 120.0),
+            TabStripOverflowState {
+                left: true,
+                right: false,
+            }
+        );
+    }
+
+    #[test]
+    fn tab_strip_overflow_state_reports_both_when_scrolled_in_middle() {
+        assert_eq!(
+            TerminalView::tab_strip_overflow_state_for_scroll(42.0, 120.0),
+            TabStripOverflowState {
+                left: true,
+                right: true,
+            }
         );
     }
 }

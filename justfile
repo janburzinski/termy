@@ -10,6 +10,18 @@ run:
 build:
     cargo build --release
 
+# Format only selected files to keep feature diffs reviewable.
+# Example:
+# just fmt src/main.rs src/terminal_view/render.rs
+fmt *paths:
+    set -- {{ paths }}; \
+    if [ "$#" -eq 0 ]; then \
+      echo "Usage: just fmt <path> [<path> ...]"; \
+      echo "Example: just fmt src/main.rs src/terminal_view/render.rs"; \
+      exit 2; \
+    fi; \
+    cargo fmt -- "$@"
+
 # Generate macOS .icns file from assets/termy_icon@1024px.png
 generate-icon:
     ./scripts/generate-icon.sh

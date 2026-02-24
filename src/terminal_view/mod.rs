@@ -58,7 +58,7 @@ const TITLEBAR_HEIGHT: f32 = 32.0;
 #[cfg(not(target_os = "windows"))]
 const TITLEBAR_HEIGHT: f32 = 34.0;
 const TABBAR_HEIGHT: f32 = 34.0;
-const TOP_STRIP_SIDE_PADDING: f32 = 10.0;
+const TOP_STRIP_SIDE_PADDING: f32 = 8.0;
 #[cfg(macos_sdk_26)]
 const TOP_STRIP_MACOS_TRAFFIC_LIGHT_PADDING: f32 = 78.0;
 #[cfg(not(macos_sdk_26))]
@@ -88,7 +88,7 @@ const TAB_DROP_MARKER_WIDTH: f32 = 2.0;
 const TAB_DROP_MARKER_INSET_Y: f32 = 3.0;
 const TAB_DRAG_AUTOSCROLL_EDGE_WIDTH: f32 = 32.0;
 const TAB_DRAG_AUTOSCROLL_MAX_STEP: f32 = 24.0;
-const TABBAR_ACTION_RAIL_WIDTH: f32 = 40.0;
+const TABBAR_ACTION_RAIL_WIDTH: f32 = 36.0;
 const TABBAR_NEW_TAB_BUTTON_SIZE: f32 = 22.0;
 const TABBAR_NEW_TAB_BUTTON_RADIUS: f32 = 2.0;
 const TABBAR_NEW_TAB_ICON_SIZE: f32 = 13.0;
@@ -558,6 +558,7 @@ pub struct TerminalView {
     tab_drag_pointer_x: Option<f32>,
     tab_drag_viewport_width: f32,
     tab_drag_autoscroll_animating: bool,
+    titlebar_move_armed: bool,
     terminal_scrollbar_visibility: TerminalScrollbarVisibility,
     terminal_scrollbar_style: TerminalScrollbarStyle,
     terminal_scrollbar_visibility_controller: ScrollbarVisibilityController,
@@ -1044,6 +1045,7 @@ impl TerminalView {
             tab_drag_pointer_x: None,
             tab_drag_viewport_width: 0.0,
             tab_drag_autoscroll_animating: false,
+            titlebar_move_armed: false,
             terminal_scrollbar_visibility: config.terminal_scrollbar_visibility,
             terminal_scrollbar_style: config.terminal_scrollbar_style,
             terminal_scrollbar_visibility_controller: ScrollbarVisibilityController::default(),
@@ -1267,6 +1269,22 @@ impl TerminalView {
 
     fn show_tab_bar(&self) -> bool {
         self.use_tabs
+    }
+
+    pub(super) fn tabs_in_titlebar_for_use_tabs(use_tabs: bool) -> bool {
+        #[cfg(target_os = "macos")]
+        {
+            use_tabs
+        }
+        #[cfg(not(target_os = "macos"))]
+        {
+            let _ = use_tabs;
+            false
+        }
+    }
+
+    pub(super) fn tabs_in_titlebar(&self) -> bool {
+        Self::tabs_in_titlebar_for_use_tabs(self.show_tab_bar())
     }
 
     fn active_context_title(&self) -> &str {

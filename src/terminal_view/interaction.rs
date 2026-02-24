@@ -1627,6 +1627,150 @@ impl TerminalView {
         window.start_window_move();
     }
 
+    fn titlebar_left_padding_for_platform() -> f32 {
+        if cfg!(target_os = "macos") {
+            TOP_STRIP_MACOS_TRAFFIC_LIGHT_PADDING
+        } else {
+            TOP_STRIP_SIDE_PADDING
+        }
+    }
+
+    fn unified_titlebar_tab_shell_hit_test(
+        pointer_x: f32,
+        pointer_y: f32,
+        tab_widths: impl IntoIterator<Item = f32>,
+        scroll_offset_x: f32,
+    ) -> bool {
+        let tab_top = TOP_STRIP_CONTENT_OFFSET_Y + (TABBAR_HEIGHT - TAB_ITEM_HEIGHT);
+        let tab_bottom = TOP_STRIP_CONTENT_OFFSET_Y + TABBAR_HEIGHT;
+        if pointer_y < tab_top || pointer_y > tab_bottom {
+            return false;
+        }
+
+        let mut left = TAB_HORIZONTAL_PADDING + scroll_offset_x;
+        for width in tab_widths {
+            let right = left + width;
+            if pointer_x >= left && pointer_x <= right {
+                return true;
+            }
+            left = right + TAB_ITEM_GAP;
+        }
+
+        false
+    }
+
+    fn unified_titlebar_tab_interactive_hit_test(&self, x: f32, y: f32, window: &Window) -> bool {
+        if !self.show_tab_bar() {
+            return false;
+        }
+
+        let row_start_x = Self::titlebar_left_padding_for_platform();
+        let viewport_width: f32 = window.viewport_size().width.into();
+        let tabs_viewport_width = self.tab_strip_drag_viewport_width(window);
+        let tabs_viewport_end_x = row_start_x + tabs_viewport_width;
+
+        if x >= row_start_x && x <= tabs_viewport_end_x {
+            let pointer_x = x - row_start_x;
+            let scroll_offset_x: f32 = self.tab_strip_scroll_handle.offset().x.into();
+            if Self::unified_titlebar_tab_shell_hit_test(
+                pointer_x,
+                y,
+                self.tabs.iter().map(|tab| tab.display_width),
+                scroll_offset_x,
+            ) {
+                return true;
+            }
+        }
+
+        let row_width = (viewport_width - row_start_x - TOP_STRIP_SIDE_PADDING).max(0.0);
+        let action_rail_width = TABBAR_ACTION_RAIL_WIDTH.min(row_width);
+        let action_rail_start_x = tabs_viewport_end_x;
+        let action_rail_end_x = action_rail_start_x + action_rail_width;
+        if x < action_rail_start_x || x > action_rail_end_x {
+            return false;
+        }
+
+        let button_start_x =
+            action_rail_start_x + ((action_rail_width - TABBAR_NEW_TAB_BUTTON_SIZE) * 0.5).max(0.0);
+        let button_end_x = button_start_x + TABBAR_NEW_TAB_BUTTON_SIZE;
+        let button_start_y = TOP_STRIP_CONTENT_OFFSET_Y
+            + ((TABBAR_HEIGHT - TABBAR_NEW_TAB_BUTTON_SIZE) * 0.5).max(0.0);
+        let button_end_y = button_start_y + TABBAR_NEW_TAB_BUTTON_SIZE;
+
+        x >= button_start_x && x <= button_end_x && y >= button_start_y && y <= button_end_y
+    }
+
+    pub(super) fn handle_unified_titlebar_mouse_down(
+        &mut self,
+        event: &MouseDownEvent,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if event.button != MouseButton::Left {
+            return;
+        }
+
+        let x: f32 = event.position.x.into();
+        let y: f32 = event.position.y.into();
+        if self.unified_titlebar_tab_interactive_hit_test(x, y, window) {
+            self.titlebar_move_armed = false;
+            return;
+        }
+
+        if event.click_count == 2 {
+            self.titlebar_move_armed = false;
+            #[cfg(target_os = "macos")]
+            window.titlebar_double_click();
+            #[cfg(not(target_os = "macos"))]
+            window.zoom_window();
+            cx.stop_propagation();
+            return;
+        }
+
+        self.titlebar_move_armed = true;
+        cx.stop_propagation();
+    }
+
+    pub(super) fn handle_unified_titlebar_mouse_up(
+        &mut self,
+        event: &MouseUpEvent,
+        _window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if event.button != MouseButton::Left {
+            return;
+        }
+
+        self.titlebar_move_armed = false;
+        cx.stop_propagation();
+    }
+
+    pub(super) fn maybe_start_titlebar_window_move(
+        &mut self,
+        dragging: bool,
+        window: &mut Window,
+    ) -> bool {
+        if !Self::should_start_titlebar_window_move(
+            self.titlebar_move_armed,
+            dragging,
+            self.tab_drag.is_some(),
+        ) {
+            return false;
+        }
+
+        self.titlebar_move_armed = false;
+        window.start_window_move();
+        true
+    }
+
+    fn should_start_titlebar_window_move(
+        titlebar_move_armed: bool,
+        dragging: bool,
+        tab_drag_active: bool,
+    ) -> bool {
+        titlebar_move_armed && dragging && !tab_drag_active
+    }
+
     pub(super) fn handle_terminal_scroll_wheel(
         &mut self,
         event: &ScrollWheelEvent,
@@ -1681,15 +1825,11 @@ impl TerminalView {
     }
 
     pub(super) fn tab_bar_height(&self) -> f32 {
-        if self.show_tab_bar() {
-            TABBAR_HEIGHT
-        } else {
-            0.0
-        }
+        Self::tab_bar_height_for_mode(self.show_tab_bar(), self.tabs_in_titlebar())
     }
 
     pub(super) fn titlebar_height(&self) -> f32 {
-        TITLEBAR_HEIGHT
+        Self::titlebar_height_for_mode(self.tabs_in_titlebar())
     }
 
     pub(super) fn update_banner_height(&self) -> f32 {
@@ -1702,6 +1842,22 @@ impl TerminalView {
 
     pub(super) fn chrome_height(&self) -> f32 {
         self.titlebar_height() + self.tab_bar_height() + self.update_banner_height()
+    }
+
+    fn tab_bar_height_for_mode(show_tab_bar: bool, tabs_in_titlebar: bool) -> f32 {
+        if show_tab_bar && !tabs_in_titlebar {
+            TABBAR_HEIGHT
+        } else {
+            0.0
+        }
+    }
+
+    fn titlebar_height_for_mode(tabs_in_titlebar: bool) -> f32 {
+        if tabs_in_titlebar {
+            TITLEBAR_HEIGHT.max(TABBAR_HEIGHT)
+        } else {
+            TITLEBAR_HEIGHT
+        }
     }
 }
 
@@ -1780,5 +1936,85 @@ mod tests {
             TerminalView::command_palette_mode_for_action(CommandAction::OpenConfig),
             None
         );
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn tabs_in_titlebar_is_enabled_when_tabs_are_enabled_on_macos() {
+        assert!(TerminalView::tabs_in_titlebar_for_use_tabs(true));
+        assert!(!TerminalView::tabs_in_titlebar_for_use_tabs(false));
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    #[test]
+    fn tabs_in_titlebar_is_disabled_outside_macos() {
+        assert!(!TerminalView::tabs_in_titlebar_for_use_tabs(true));
+        assert!(!TerminalView::tabs_in_titlebar_for_use_tabs(false));
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn chrome_height_uses_single_row_when_tabs_are_in_titlebar() {
+        let tabs_in_titlebar = TerminalView::tabs_in_titlebar_for_use_tabs(true);
+        let titlebar_height = TerminalView::titlebar_height_for_mode(tabs_in_titlebar);
+        let tab_bar_height = TerminalView::tab_bar_height_for_mode(true, tabs_in_titlebar);
+        assert_eq!(tab_bar_height, 0.0);
+        assert_eq!(titlebar_height, TITLEBAR_HEIGHT.max(TABBAR_HEIGHT));
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    #[test]
+    fn chrome_height_keeps_stacked_rows_outside_macos() {
+        let tabs_in_titlebar = TerminalView::tabs_in_titlebar_for_use_tabs(true);
+        let titlebar_height = TerminalView::titlebar_height_for_mode(tabs_in_titlebar);
+        let tab_bar_height = TerminalView::tab_bar_height_for_mode(true, tabs_in_titlebar);
+        assert_eq!(titlebar_height, TITLEBAR_HEIGHT);
+        assert_eq!(tab_bar_height, TABBAR_HEIGHT);
+    }
+
+    #[test]
+    fn titlebar_window_move_requires_armed_and_dragging() {
+        assert!(!TerminalView::should_start_titlebar_window_move(
+            false, true, false
+        ));
+        assert!(!TerminalView::should_start_titlebar_window_move(
+            true, false, false
+        ));
+        assert!(TerminalView::should_start_titlebar_window_move(
+            true, true, false
+        ));
+    }
+
+    #[test]
+    fn titlebar_window_move_does_not_start_during_tab_drag() {
+        assert!(!TerminalView::should_start_titlebar_window_move(
+            true, true, true
+        ));
+    }
+
+    #[test]
+    fn unified_titlebar_tab_shell_hit_test_detects_tabs_and_respects_y_bounds() {
+        let widths = [100.0, 120.0];
+        let scroll_offset_x = 0.0;
+        let tab_y = TOP_STRIP_CONTENT_OFFSET_Y + TABBAR_HEIGHT - 1.0;
+
+        assert!(TerminalView::unified_titlebar_tab_shell_hit_test(
+            TAB_HORIZONTAL_PADDING + 20.0,
+            tab_y,
+            widths,
+            scroll_offset_x
+        ));
+        assert!(!TerminalView::unified_titlebar_tab_shell_hit_test(
+            TAB_HORIZONTAL_PADDING + 240.0,
+            tab_y,
+            widths,
+            scroll_offset_x
+        ));
+        assert!(!TerminalView::unified_titlebar_tab_shell_hit_test(
+            TAB_HORIZONTAL_PADDING + 20.0,
+            TOP_STRIP_CONTENT_OFFSET_Y,
+            widths,
+            scroll_offset_x
+        ));
     }
 }
