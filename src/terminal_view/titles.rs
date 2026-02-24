@@ -11,16 +11,9 @@ impl TerminalView {
     }
 
     pub(super) fn tab_title_char_budget(display_width: f32, close_slot_width: f32) -> usize {
-        let hidden_close_guard = if close_slot_width <= f32::EPSILON {
-            TAB_TITLE_BUDGET_HIDDEN_CLOSE_GUARD_PX
-        } else {
-            0.0
-        };
         let text_area = (display_width
             - (TAB_TEXT_PADDING_X * 2.0)
-            - close_slot_width
-            - TAB_TITLE_BUDGET_CLOSE_GUARD_PX
-            - hidden_close_guard)
+            - close_slot_width)
             .max(0.0);
         (text_area / TAB_TITLE_CHAR_WIDTH).floor() as usize
     }
@@ -183,7 +176,11 @@ impl TerminalView {
         }
 
         self.tabs[index].title = next;
-        self.tabs[index].display_width = Self::tab_display_width_for_title(&self.tabs[index].title);
+        let sticky_title_width = Self::tab_display_width_for_title_without_close_with_max(
+            &self.tabs[index].title,
+            TAB_MAX_WIDTH,
+        );
+        self.tabs[index].sticky_title_width = self.tabs[index].sticky_title_width.max(sticky_title_width);
         self.mark_tab_strip_layout_dirty();
         true
     }
@@ -358,7 +355,7 @@ mod tests {
     #[test]
     fn tab_title_char_budget_accounts_for_padding_and_close_slot() {
         let budget = TerminalView::tab_title_char_budget(TAB_MIN_WIDTH, TAB_CLOSE_SLOT_WIDTH);
-        assert_eq!(budget, 5);
+        assert_eq!(budget, 7);
     }
 
     #[test]
@@ -370,9 +367,18 @@ mod tests {
     }
 
     #[test]
-    fn tab_title_char_budget_applies_edge_guard_without_close_slot() {
+    fn tab_title_char_budget_without_close_slot_uses_full_text_area() {
         let budget_hidden = TerminalView::tab_title_char_budget(TAB_MIN_WIDTH, 0.0);
-        assert_eq!(budget_hidden, 8);
+        assert_eq!(budget_hidden, 10);
+    }
+
+    #[test]
+    fn tab_title_budget_keeps_active_exact_fit_path_untruncated() {
+        let title = "~/Desktop";
+        let width = TerminalView::tab_display_width_for_title_with_max(title, TAB_MAX_WIDTH);
+        let budget = TerminalView::tab_title_char_budget(width, TAB_CLOSE_SLOT_WIDTH);
+
+        assert_eq!(TerminalView::format_tab_label_for_render(title, budget), title);
     }
 
     #[test]

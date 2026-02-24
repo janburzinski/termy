@@ -30,6 +30,8 @@ const VALID_KEYS: &[&str] = &[
     "tab_title_shell_integration",
     "tab_title_prompt_format",
     "tab_title_command_format",
+    "tab_close_visibility",
+    "tab_width_mode",
 ];
 
 const VALID_SECTIONS: &[&str] = &["colors", "tab_title"];
@@ -218,6 +220,34 @@ pub fn run() {
                         errors.push(format!(
                             "Line {}: {} must be 'true' or 'false'",
                             line_num, key
+                        ));
+                    }
+                }
+                "tab_close_visibility" => {
+                    if !["active_hover", "activehover", "active+hover", "hover", "always"]
+                        .contains(&value.to_lowercase().as_str())
+                    {
+                        errors.push(format!(
+                            "Line {}: tab_close_visibility must be 'active_hover', 'hover', or 'always'",
+                            line_num
+                        ));
+                    }
+                }
+                "tab_width_mode" => {
+                    if ![
+                        "stable",
+                        "active_grow",
+                        "activegrow",
+                        "active-grow",
+                        "active_grow_sticky",
+                        "activegrowsticky",
+                        "active-grow-sticky",
+                    ]
+                    .contains(&value.to_lowercase().as_str())
+                    {
+                        errors.push(format!(
+                            "Line {}: tab_width_mode must be 'stable', 'active_grow', or 'active_grow_sticky'",
+                            line_num
                         ));
                     }
                 }

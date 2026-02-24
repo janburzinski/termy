@@ -1,8 +1,8 @@
 use crate::colors::TerminalColors;
 use crate::commands::{self, CommandAction};
 use crate::config::{
-    self, AppConfig, CursorStyle as AppCursorStyle, TabTitleConfig, TabTitleSource,
-    TerminalScrollbarStyle, TerminalScrollbarVisibility,
+    self, AppConfig, CursorStyle as AppCursorStyle, TabCloseVisibility, TabTitleConfig,
+    TabTitleSource, TabWidthMode, TerminalScrollbarStyle, TerminalScrollbarVisibility,
 };
 use crate::keybindings;
 use crate::ui::scrollbar::{ScrollbarVisibilityController, ScrollbarVisibilityMode};
@@ -178,6 +178,7 @@ struct TerminalTab {
     pending_command_title: Option<String>,
     pending_command_token: u64,
     title: String,
+    sticky_title_width: f32,
     display_width: f32,
     running_process: bool,
 }
@@ -188,7 +189,10 @@ impl TerminalTab {
             .as_deref()
             .unwrap_or(DEFAULT_TAB_TITLE)
             .to_string();
-        let display_width = TerminalView::tab_display_width_for_title(&title);
+        let sticky_title_width =
+            TerminalView::tab_display_width_for_title_without_close_with_max(&title, TAB_MAX_WIDTH);
+        let display_width =
+            TerminalView::tab_display_width_for_title_with_max(&title, TAB_MAX_WIDTH);
 
         Self {
             terminal,
@@ -198,6 +202,7 @@ impl TerminalTab {
             pending_command_title: None,
             pending_command_token: 0,
             title,
+            sticky_title_width,
             display_width,
             running_process: false,
         }
@@ -466,6 +471,8 @@ pub struct TerminalView {
     inactive_tab_scrollback: Option<usize>,
     warn_on_quit_with_running_process: bool,
     tab_title: TabTitleConfig,
+    tab_close_visibility: TabCloseVisibility,
+    tab_width_mode: TabWidthMode,
     tab_shell_integration: TabTitleShellIntegration,
     configured_working_dir: Option<String>,
     terminal_runtime: TerminalRuntimeConfig,
@@ -946,6 +953,8 @@ impl TerminalView {
             inactive_tab_scrollback: config.inactive_tab_scrollback,
             warn_on_quit_with_running_process: config.warn_on_quit_with_running_process,
             tab_title,
+            tab_close_visibility: config.tab_close_visibility,
+            tab_width_mode: config.tab_width_mode,
             tab_shell_integration,
             configured_working_dir,
             terminal_runtime,
@@ -1039,6 +1048,10 @@ impl TerminalView {
         self.inactive_tab_scrollback = config.inactive_tab_scrollback;
         self.warn_on_quit_with_running_process = config.warn_on_quit_with_running_process;
         self.tab_title = config.tab_title.clone();
+        let tab_close_visibility_changed = self.tab_close_visibility != config.tab_close_visibility;
+        let tab_width_mode_changed = self.tab_width_mode != config.tab_width_mode;
+        self.tab_close_visibility = config.tab_close_visibility;
+        self.tab_width_mode = config.tab_width_mode;
         self.tab_shell_integration = TabTitleShellIntegration {
             enabled: self.tab_title.shell_integration,
             explicit_prefix: self.tab_title.explicit_prefix.clone(),
@@ -1069,6 +1082,9 @@ impl TerminalView {
 
         for index in 0..self.tabs.len() {
             self.refresh_tab_title(index);
+        }
+        if tab_close_visibility_changed || tab_width_mode_changed {
+            self.mark_tab_strip_layout_dirty();
         }
 
         if self.command_palette_open {

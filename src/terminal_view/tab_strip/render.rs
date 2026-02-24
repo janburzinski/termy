@@ -289,6 +289,7 @@ impl TerminalView {
                 cx.listener(move |this, _event: &MouseDownEvent, _window, cx| {
                     let is_active = close_tab_index == this.active_tab;
                     if Self::tab_shows_close(
+                        this.tab_close_visibility,
                         is_active,
                         this.tab_strip.hovered_tab,
                         this.tab_strip.hovered_tab_close,
@@ -487,6 +488,7 @@ impl TerminalView {
             let is_active = index == self.active_tab;
             let is_hovered = self.tab_strip.hovered_tab == Some(index);
             let show_tab_close = Self::tab_shows_close(
+                self.tab_close_visibility,
                 is_active,
                 self.tab_strip.hovered_tab,
                 self.tab_strip.hovered_tab_close,

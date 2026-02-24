@@ -188,10 +188,19 @@ impl TerminalView {
         elastic.min(hard_cap)
     }
 
-    pub(super) fn tab_display_width_for_title_with_max(title: &str, max_width: f32) -> f32 {
+    fn tab_display_width_for_title_with_close_policy(
+        title: &str,
+        max_width: f32,
+        reserve_close_slot: bool,
+    ) -> f32 {
         let title_chars = title.trim().chars().count() as f32;
         let text_width = title_chars * TAB_TITLE_CHAR_WIDTH;
-        let base_width = (TAB_TEXT_PADDING_X * 2.0) + text_width + TAB_CLOSE_SLOT_WIDTH;
+        let close_slot_width = if reserve_close_slot {
+            TAB_CLOSE_SLOT_WIDTH
+        } else {
+            0.0
+        };
+        let base_width = (TAB_TEXT_PADDING_X * 2.0) + text_width + close_slot_width;
         let slack_start = TAB_MIN_WIDTH - TAB_TITLE_LAYOUT_SLACK_PX;
         let slack_end = TAB_MIN_WIDTH + TAB_TITLE_LAYOUT_SLACK_PX;
         let slack_span = (slack_end - slack_start).max(f32::EPSILON);
@@ -201,17 +210,85 @@ impl TerminalView {
         width.clamp(TAB_MIN_WIDTH, max_width.max(TAB_MIN_WIDTH))
     }
 
-    pub(super) fn tab_display_width_for_title(title: &str) -> f32 {
-        Self::tab_display_width_for_title_with_max(title, TAB_MAX_WIDTH)
+    pub(super) fn tab_display_width_for_title_with_max(title: &str, max_width: f32) -> f32 {
+        Self::tab_display_width_for_title_with_close_policy(title, max_width, true)
+    }
+
+    pub(super) fn tab_display_width_for_title_without_close_with_max(
+        title: &str,
+        max_width: f32,
+    ) -> f32 {
+        Self::tab_display_width_for_title_with_close_policy(title, max_width, false)
+    }
+
+    fn tab_reserves_close_slot_for_layout(
+        tab_width_mode: TabWidthMode,
+        tab_close_visibility: TabCloseVisibility,
+        is_active: bool,
+    ) -> bool {
+        match tab_width_mode {
+            TabWidthMode::Stable => true,
+            TabWidthMode::ActiveGrow | TabWidthMode::ActiveGrowSticky => {
+                matches!(tab_close_visibility, TabCloseVisibility::Always)
+                    || (matches!(tab_close_visibility, TabCloseVisibility::ActiveHover) && is_active)
+            }
+        }
+    }
+
+    fn resolve_tab_width_for_mode(
+        tab_width_mode: TabWidthMode,
+        title: &str,
+        effective_max: f32,
+        reserve_close_slot: bool,
+        sticky_title_width: f32,
+    ) -> (f32, f32) {
+        let capped_max = effective_max.max(TAB_MIN_WIDTH);
+        let title_only_width =
+            Self::tab_display_width_for_title_without_close_with_max(title, effective_max);
+        let close_policy_width =
+            Self::tab_display_width_for_title_with_close_policy(title, effective_max, reserve_close_slot);
+
+        match tab_width_mode {
+            TabWidthMode::Stable | TabWidthMode::ActiveGrow => (close_policy_width, title_only_width),
+            TabWidthMode::ActiveGrowSticky => {
+                let next_sticky_width = sticky_title_width.max(title_only_width).min(capped_max);
+                let next_width = if reserve_close_slot {
+                    close_policy_width.max(next_sticky_width).min(capped_max)
+                } else {
+                    next_sticky_width
+                };
+                (next_width, next_sticky_width)
+            }
+        }
     }
 
     pub(super) fn sync_tab_display_widths_for_viewport(&mut self, viewport_width: f32) -> bool {
+        let viewport_width = if viewport_width.is_finite() {
+            viewport_width.max(0.0)
+        } else {
+            0.0
+        };
         let effective_max =
             Self::effective_tab_max_width_for_viewport(viewport_width, self.tabs.len());
         let mut changed = false;
+        let tab_width_mode = self.tab_width_mode;
+        let tab_close_visibility = self.tab_close_visibility;
 
-        for tab in &mut self.tabs {
-            let next_width = Self::tab_display_width_for_title_with_max(&tab.title, effective_max);
+        for (index, tab) in self.tabs.iter_mut().enumerate() {
+            let is_active = index == self.active_tab;
+            let reserve_close_slot = Self::tab_reserves_close_slot_for_layout(
+                tab_width_mode,
+                tab_close_visibility,
+                is_active,
+            );
+            let (next_width, next_sticky_width) = Self::resolve_tab_width_for_mode(
+                tab_width_mode,
+                &tab.title,
+                effective_max,
+                reserve_close_slot,
+                tab.sticky_title_width,
+            );
+            tab.sticky_title_width = next_sticky_width;
             if (tab.display_width - next_width).abs() <= f32::EPSILON {
                 continue;
             }
@@ -231,7 +308,11 @@ impl TerminalView {
         &mut self,
         viewport_width: f32,
     ) -> bool {
-        let clamped_viewport = viewport_width.max(0.0);
+        let clamped_viewport = if viewport_width.is_finite() {
+            viewport_width.max(0.0)
+        } else {
+            0.0
+        };
         let viewport_unchanged =
             (self.tab_strip.layout_last_synced_viewport_width - clamped_viewport).abs() <= f32::EPSILON;
         let revision_unchanged = self.tab_strip.layout_last_synced_revision == self.tab_strip.layout_revision;
@@ -246,12 +327,21 @@ impl TerminalView {
     }
 
     pub(super) fn tab_shows_close(
+        close_visibility: TabCloseVisibility,
         is_active: bool,
         hovered_tab: Option<usize>,
         hovered_tab_close: Option<usize>,
         index: usize,
     ) -> bool {
-        is_active || hovered_tab == Some(index) || hovered_tab_close == Some(index)
+        match close_visibility {
+            TabCloseVisibility::ActiveHover => {
+                is_active || hovered_tab == Some(index) || hovered_tab_close == Some(index)
+            }
+            TabCloseVisibility::Hover => {
+                hovered_tab == Some(index) || hovered_tab_close == Some(index)
+            }
+            TabCloseVisibility::Always => true,
+        }
     }
 
     fn remap_index_after_move(index: usize, from: usize, to: usize) -> usize {
@@ -584,6 +674,12 @@ impl TerminalView {
 
         let old_active = self.active_tab;
         self.active_tab = index;
+        if self.tab_width_mode != TabWidthMode::Stable {
+            self.mark_tab_strip_layout_dirty();
+            self.sync_tab_display_widths_for_viewport_if_needed(
+                self.tab_strip.layout_last_synced_viewport_width,
+            );
+        }
 
         // Apply inactive_tab_scrollback optimization if configured
         if let Some(inactive_scrollback) = self.inactive_tab_scrollback {
@@ -651,14 +747,15 @@ mod tests {
 
     #[test]
     fn tab_display_width_for_title_clamps_to_min() {
-        let width = TerminalView::tab_display_width_for_title("a");
+        let width = TerminalView::tab_display_width_for_title_with_max("a", TAB_MAX_WIDTH);
         assert_eq!(width, TAB_MIN_WIDTH);
     }
 
     #[test]
     fn tab_display_width_for_title_clamps_to_max() {
         let very_long_title = "x".repeat(200);
-        let width = TerminalView::tab_display_width_for_title(&very_long_title);
+        let width =
+            TerminalView::tab_display_width_for_title_with_max(&very_long_title, TAB_MAX_WIDTH);
         assert_eq!(width, TAB_MAX_WIDTH);
     }
 
@@ -738,11 +835,150 @@ mod tests {
 
     #[test]
     fn tab_shows_close_for_active_or_hovered() {
-        assert!(TerminalView::tab_shows_close(true, None, None, 1));
-        assert!(TerminalView::tab_shows_close(false, Some(1), None, 1));
-        assert!(TerminalView::tab_shows_close(false, None, Some(1), 1));
-        assert!(!TerminalView::tab_shows_close(false, Some(2), None, 1));
-        assert!(!TerminalView::tab_shows_close(false, None, Some(2), 1));
+        assert!(TerminalView::tab_shows_close(
+            TabCloseVisibility::ActiveHover,
+            true,
+            None,
+            None,
+            1,
+        ));
+        assert!(TerminalView::tab_shows_close(
+            TabCloseVisibility::ActiveHover,
+            false,
+            Some(1),
+            None,
+            1,
+        ));
+        assert!(TerminalView::tab_shows_close(
+            TabCloseVisibility::ActiveHover,
+            false,
+            None,
+            Some(1),
+            1,
+        ));
+        assert!(!TerminalView::tab_shows_close(
+            TabCloseVisibility::ActiveHover,
+            false,
+            Some(2),
+            None,
+            1,
+        ));
+        assert!(!TerminalView::tab_shows_close(
+            TabCloseVisibility::ActiveHover,
+            false,
+            None,
+            Some(2),
+            1,
+        ));
+    }
+
+    #[test]
+    fn tab_shows_close_hover_mode_ignores_active_state() {
+        assert!(!TerminalView::tab_shows_close(
+            TabCloseVisibility::Hover,
+            true,
+            None,
+            None,
+            0,
+        ));
+        assert!(TerminalView::tab_shows_close(
+            TabCloseVisibility::Hover,
+            false,
+            Some(0),
+            None,
+            0,
+        ));
+    }
+
+    #[test]
+    fn tab_shows_close_always_mode_always_true() {
+        assert!(TerminalView::tab_shows_close(
+            TabCloseVisibility::Always,
+            false,
+            None,
+            None,
+            2,
+        ));
+    }
+
+    #[test]
+    fn active_grow_mode_reserves_close_slot_for_active_only() {
+        let title = "~/Desktop";
+        let max_width = 512.0;
+        let expected_active = TerminalView::tab_display_width_for_title_with_close_policy(
+            title, max_width, true,
+        );
+        let expected_inactive = TerminalView::tab_display_width_for_title_with_close_policy(
+            title, max_width, false,
+        );
+
+        let (active_width, active_sticky) = TerminalView::resolve_tab_width_for_mode(
+            TabWidthMode::ActiveGrow,
+            title,
+            max_width,
+            true,
+            TAB_MIN_WIDTH,
+        );
+        let (inactive_width, inactive_sticky) = TerminalView::resolve_tab_width_for_mode(
+            TabWidthMode::ActiveGrow,
+            title,
+            max_width,
+            false,
+            TAB_MIN_WIDTH,
+        );
+
+        assert_eq!(active_width, expected_active);
+        assert_eq!(inactive_width, expected_inactive);
+        assert_eq!(active_sticky, expected_inactive);
+        assert_eq!(inactive_sticky, expected_inactive);
+        assert!(active_width > inactive_width);
+    }
+
+    #[test]
+    fn active_grow_sticky_drops_close_only_extra_when_inactive() {
+        let title = "~/Desktop";
+        let max_width = 512.0;
+        let title_only =
+            TerminalView::tab_display_width_for_title_without_close_with_max(title, max_width);
+        let with_close =
+            TerminalView::tab_display_width_for_title_with_close_policy(title, max_width, true);
+
+        let (active_width, sticky_after_active) = TerminalView::resolve_tab_width_for_mode(
+            TabWidthMode::ActiveGrowSticky,
+            title,
+            max_width,
+            true,
+            title_only,
+        );
+        let (inactive_width, sticky_after_inactive) = TerminalView::resolve_tab_width_for_mode(
+            TabWidthMode::ActiveGrowSticky,
+            title,
+            max_width,
+            false,
+            sticky_after_active,
+        );
+
+        assert_eq!(active_width, with_close);
+        assert_eq!(inactive_width, title_only);
+        assert_eq!(sticky_after_inactive, title_only);
+    }
+
+    #[test]
+    fn active_grow_sticky_caps_sticky_width_under_pressure() {
+        let title = "tab";
+        let effective_max = 118.0;
+        let prior_sticky = 260.0;
+
+        let (next_width, next_sticky) = TerminalView::resolve_tab_width_for_mode(
+            TabWidthMode::ActiveGrowSticky,
+            title,
+            effective_max,
+            false,
+            prior_sticky,
+        );
+
+        assert_eq!(next_sticky, effective_max);
+        assert_eq!(next_width, effective_max);
     }
 
     #[test]

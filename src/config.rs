@@ -33,6 +33,10 @@ term = xterm-256color\n\
 tab_title_mode = smart\n\
 # Export TERMY_* env vars for optional shell tab-title integration\n\
 tab_title_shell_integration = true\n\
+# Tab close button visibility: active_hover | hover | always\n\
+tab_close_visibility = active_hover\n\
+# Tab width behavior: stable | active_grow | active_grow_sticky\n\
+tab_width_mode = active_grow_sticky\n\
 # Optional: static fallback tab title\n\
 # tab_title_fallback = Terminal\n\
 # Advanced tab-title options are documented in docs/configuration.md:\n\
@@ -278,6 +282,56 @@ impl TabTitleMode {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TabCloseVisibility {
+    ActiveHover,
+    Hover,
+    Always,
+}
+
+impl TabCloseVisibility {
+    fn from_str(value: &str) -> Option<Self> {
+        match value.trim().to_ascii_lowercase().as_str() {
+            "active_hover" | "activehover" | "active+hover" => Some(Self::ActiveHover),
+            "hover" => Some(Self::Hover),
+            "always" => Some(Self::Always),
+            _ => None,
+        }
+    }
+}
+
+impl Default for TabCloseVisibility {
+    fn default() -> Self {
+        Self::ActiveHover
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TabWidthMode {
+    Stable,
+    ActiveGrow,
+    ActiveGrowSticky,
+}
+
+impl TabWidthMode {
+    fn from_str(value: &str) -> Option<Self> {
+        match value.trim().to_ascii_lowercase().as_str() {
+            "stable" => Some(Self::Stable),
+            "active_grow" | "activegrow" | "active-grow" => Some(Self::ActiveGrow),
+            "active_grow_sticky" | "activegrowsticky" | "active-grow-sticky" => {
+                Some(Self::ActiveGrowSticky)
+            }
+            _ => None,
+        }
+    }
+}
+
+impl Default for TabWidthMode {
+    fn default() -> Self {
+        Self::ActiveGrowSticky
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct TabTitleConfig {
     pub mode: TabTitleMode,
@@ -388,6 +442,8 @@ pub struct AppConfig {
     pub working_dir_fallback: WorkingDirFallback,
     pub warn_on_quit_with_running_process: bool,
     pub tab_title: TabTitleConfig,
+    pub tab_close_visibility: TabCloseVisibility,
+    pub tab_width_mode: TabWidthMode,
     pub shell: Option<String>,
     pub term: String,
     pub colorterm: Option<String>,
@@ -425,6 +481,8 @@ impl Default for AppConfig {
             working_dir_fallback: WorkingDirFallback::default(),
             warn_on_quit_with_running_process: DEFAULT_WARN_ON_QUIT_WITH_RUNNING_PROCESS,
             tab_title: TabTitleConfig::default(),
+            tab_close_visibility: TabCloseVisibility::default(),
+            tab_width_mode: TabWidthMode::default(),
             shell: None,
             term: DEFAULT_TERM.to_string(),
             colorterm: Some(DEFAULT_COLORTERM.to_string()),
@@ -554,6 +612,18 @@ impl AppConfig {
             if key.eq_ignore_ascii_case("tab_title_command_format") {
                 if let Some(format) = parse_string_value(value) {
                     config.tab_title.command_format = format;
+                }
+            }
+
+            if key.eq_ignore_ascii_case("tab_close_visibility") {
+                if let Some(visibility) = TabCloseVisibility::from_str(value) {
+                    config.tab_close_visibility = visibility;
+                }
+            }
+
+            if key.eq_ignore_ascii_case("tab_width_mode") {
+                if let Some(mode) = TabWidthMode::from_str(value) {
+                    config.tab_width_mode = mode;
                 }
             }
 
@@ -1027,9 +1097,9 @@ fn config_path() -> Option<PathBuf> {
 #[cfg(test)]
 mod tests {
     use super::{
-        AppConfig, CursorStyle, TabTitleMode, TabTitleSource, TerminalScrollbarStyle,
-        TerminalScrollbarVisibility, WorkingDirFallback, replace_or_insert_section,
-        upsert_theme_assignment,
+        AppConfig, CursorStyle, TabCloseVisibility, TabTitleMode, TabTitleSource, TabWidthMode,
+        TerminalScrollbarStyle, TerminalScrollbarVisibility, WorkingDirFallback,
+        replace_or_insert_section, upsert_theme_assignment,
     };
 
     #[test]
@@ -1073,6 +1143,37 @@ mod tests {
         assert!(!config.tab_title.shell_integration);
         assert_eq!(config.tab_title.prompt_format, "cwd:{cwd}");
         assert_eq!(config.tab_title.command_format, "run:{command}");
+    }
+
+    #[test]
+    fn tab_close_visibility_and_width_mode_parse_and_default() {
+        let defaults = AppConfig::from_contents("");
+        assert_eq!(defaults.tab_close_visibility, TabCloseVisibility::ActiveHover);
+        assert_eq!(defaults.tab_width_mode, TabWidthMode::ActiveGrowSticky);
+
+        let configured = AppConfig::from_contents(
+            "tab_close_visibility = hover\n\
+             tab_width_mode = stable\n",
+        );
+        assert_eq!(configured.tab_close_visibility, TabCloseVisibility::Hover);
+        assert_eq!(configured.tab_width_mode, TabWidthMode::Stable);
+
+        let configured_alias = AppConfig::from_contents(
+            "tab_close_visibility = activehover\n\
+             tab_width_mode = activegrow\n",
+        );
+        assert_eq!(
+            configured_alias.tab_close_visibility,
+            TabCloseVisibility::ActiveHover
+        );
+        assert_eq!(configured_alias.tab_width_mode, TabWidthMode::ActiveGrow);
+
+        let invalid = AppConfig::from_contents(
+            "tab_close_visibility = invalid\n\
+             tab_width_mode = invalid\n",
+        );
+        assert_eq!(invalid.tab_close_visibility, TabCloseVisibility::ActiveHover);
+        assert_eq!(invalid.tab_width_mode, TabWidthMode::ActiveGrowSticky);
     }
 
     #[test]

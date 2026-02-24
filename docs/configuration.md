@@ -73,6 +73,16 @@ Mode presets:
 - Values: `true`/`false`
 - What it does: exports `TERMY_*` environment variables for shell hooks.
 
+`tab_close_visibility`
+- Default: `active_hover`
+- Values: `active_hover`, `hover`, `always`
+- What it does: controls when tab close buttons are visible.
+
+`tab_width_mode`
+- Default: `active_grow_sticky`
+- Values: `stable`, `active_grow`, `active_grow_sticky`
+- What it does: controls how tab widths react to active state and close-slot reservation.
+
 `tab_title_fallback`
 - Default: `Terminal`
 - Values: non-empty string
@@ -137,7 +147,7 @@ Explicit payload examples:
 
 `tabs`
 - Always enabled (not configurable)
-- Behavior: tab widths are content-based with an adaptive max width when few tabs are open, the row scrolls horizontally when tabs overflow, long path-like titles are middle-squeezed (for example `~/Desktop/.../docs`) when needed, and close buttons appear on the active or hovered tab.
+- Behavior: tab widths are content-based with an adaptive max width when few tabs are open, the row scrolls horizontally when tabs overflow, long path-like titles are middle-squeezed (for example `~/Desktop/.../docs`) when needed, and close visibility/width strategy are controlled by `tab_close_visibility` + `tab_width_mode` (defaults: `active_hover` + `active_grow_sticky`).
 - Layout: tabs are rendered in the unified top/title row on macOS, Windows, and Linux.
 - Unified drag behavior: tab bodies stay dedicated to tab reordering. Window move is available from non-interactive title-row space (outside tab bodies and tab action controls).
 
@@ -173,6 +183,14 @@ Explicit payload examples:
 `tab_title_command_format`
 - Default: `{command}`
 - Values: template string
+
+`tab_close_visibility`
+- Default: `active_hover`
+- Values: `active_hover`, `hover`, `always`
+
+`tab_width_mode`
+- Default: `active_grow_sticky`
+- Values: `stable`, `active_grow`, `active_grow_sticky`
 
 `window_width`
 - Default: `1280`
