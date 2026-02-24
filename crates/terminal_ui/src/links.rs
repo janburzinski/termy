@@ -1,3 +1,8 @@
+#[cfg(windows)]
+use std::path::Path;
+#[cfg(unix)]
+use std::path::PathBuf;
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DetectedLink {
     pub start_col: usize,
@@ -59,11 +64,11 @@ pub fn classify_link_token(token: &str) -> Option<String> {
     }
 
     if lower.starts_with("file://") {
-        return Some(token.to_string());
+        return normalize_file_url_token(token);
     }
 
     if looks_like_file_path(token) {
-        return Some(format!("file://{}", token));
+        return canonicalize_path_to_file_url(token);
     }
 
     if is_ipv4_with_optional_port_and_path(token) || looks_like_domain(token) {
@@ -71,6 +76,131 @@ pub fn classify_link_token(token: &str) -> Option<String> {
     }
 
     None
+}
+
+fn normalize_file_url_token(token: &str) -> Option<String> {
+    let raw_path = token.get("file://".len()..)?;
+    let local_path = extract_local_path_from_file_url(raw_path)?;
+    canonicalize_path_to_file_url(&local_path)
+}
+
+#[cfg(unix)]
+fn extract_local_path_from_file_url(raw_path: &str) -> Option<String> {
+    if raw_path.starts_with('/') {
+        return Some(raw_path.to_string());
+    }
+
+    let (host, path) = raw_path.split_once('/')?;
+    if host.eq_ignore_ascii_case("localhost") {
+        return Some(format!("/{}", path));
+    }
+
+    None
+}
+
+#[cfg(windows)]
+fn extract_local_path_from_file_url(raw_path: &str) -> Option<String> {
+    if let Some(stripped) = raw_path.strip_prefix('/') {
+        if has_windows_drive_prefix(stripped) {
+            return Some(stripped.to_string());
+        }
+    }
+
+    if has_windows_drive_prefix(raw_path) || Path::new(raw_path).is_absolute() {
+        return Some(raw_path.to_string());
+    }
+
+    let (host, path) = raw_path.split_once('/')?;
+    if !host.eq_ignore_ascii_case("localhost") {
+        return None;
+    }
+
+    if let Some(stripped) = path.strip_prefix('/') {
+        if has_windows_drive_prefix(stripped) {
+            return Some(stripped.to_string());
+        }
+    }
+
+    if has_windows_drive_prefix(path) || Path::new(path).is_absolute() {
+        return Some(path.to_string());
+    }
+
+    None
+}
+
+#[cfg(not(any(unix, windows)))]
+fn extract_local_path_from_file_url(_: &str) -> Option<String> {
+    None
+}
+
+#[cfg(unix)]
+fn canonicalize_path_to_file_url(token: &str) -> Option<String> {
+    let raw_path = strip_line_col_suffix(token);
+    if raw_path.is_empty() {
+        return None;
+    }
+
+    let path = expand_tilde_path(raw_path).unwrap_or_else(|| PathBuf::from(raw_path));
+    let canonical = std::fs::canonicalize(path).ok()?;
+    let canonical = canonical.to_string_lossy().replace('\\', "/");
+    if !canonical.starts_with('/') {
+        return None;
+    }
+
+    Some(format!("file:///{}", canonical.trim_start_matches('/')))
+}
+
+#[cfg(unix)]
+fn expand_tilde_path(path: &str) -> Option<PathBuf> {
+    let remainder = path.strip_prefix("~/")?;
+    let home = dirs::home_dir()?;
+    Some(home.join(remainder))
+}
+
+#[cfg(windows)]
+fn canonicalize_path_to_file_url(token: &str) -> Option<String> {
+    let mut raw_path = strip_line_col_suffix(token);
+    if raw_path.is_empty() {
+        return None;
+    }
+
+    if let Some(stripped) = raw_path.strip_prefix('/') {
+        if has_windows_drive_prefix(stripped) {
+            raw_path = stripped;
+        }
+    }
+
+    if !has_windows_drive_prefix(raw_path) && !Path::new(raw_path).is_absolute() {
+        return None;
+    }
+
+    let canonical = std::fs::canonicalize(raw_path).ok()?;
+    let canonical = canonical.to_string_lossy();
+    let canonical = canonical.strip_prefix(r"\\?\").unwrap_or(&canonical);
+    let canonical = canonical.replace('\\', "/");
+
+    if !has_windows_drive_prefix(&canonical) {
+        return None;
+    }
+
+    let drive = canonical.chars().next()?.to_ascii_uppercase();
+    let path = canonical[2..].trim_start_matches('/');
+
+    if path.is_empty() {
+        Some(format!("file:///{drive}/"))
+    } else {
+        Some(format!("file:///{drive}/{path}"))
+    }
+}
+
+#[cfg(not(any(unix, windows)))]
+fn canonicalize_path_to_file_url(_: &str) -> Option<String> {
+    None
+}
+
+fn has_windows_drive_prefix(path: &str) -> bool {
+    let bytes = path.as_bytes();
+    bytes.len() >= 2 && bytes[0].is_ascii_alphabetic() && bytes[1] == b':'
 }
 
 fn edge_trim_char(c: char) -> bool {
@@ -191,7 +321,7 @@ fn looks_like_file_path(input: &str) -> bool {
     // Windows absolute paths (C:\, D:\, etc.)
     if path.len() >= 3 {
         let bytes = path.as_bytes();
-        if bytes[0].is_ascii_alphabetic() && bytes[1] == b':' && (bytes[2] == b'\\' || bytes[2] == b'/') {
+        if has_windows_drive_prefix(path) && (bytes[2] == b'\\' || bytes[2] == b'/') {
             return has_path_like_structure(path);
         }
     }
@@ -232,4 +362,71 @@ fn has_path_like_structure(path: &str) -> bool {
     });
 
     has_separator || has_extension
+}
+
+#[cfg(test)]
+mod tests {
+    use super::classify_link_token;
+    use std::fs;
+    use std::path::PathBuf;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    fn unique_temp_path(file_name: &str) -> PathBuf {
+        let nonce = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("system time before unix epoch")
+            .as_nanos();
+        std::env::temp_dir().join(format!("termy-links-{nonce}-{file_name}"))
+    }
+
+    #[test]
+    fn absolute_file_paths_emit_well_formed_file_urls() {
+        let file_path = unique_temp_path("sample.txt");
+        fs::write(&file_path, "sample").expect("write temp file");
+
+        let token = file_path.to_string_lossy();
+        let link = classify_link_token(&token).expect("file path should produce a file URL");
+
+        assert!(link.starts_with("file:///"));
+        assert!(!link.contains('\\'));
+
+        #[cfg(unix)]
+        {
+            let canonical = fs::canonicalize(&file_path).expect("canonicalize temp file");
+            let canonical = canonical.to_string_lossy();
+            assert_eq!(
+                link,
+                format!("file:///{}", canonical.trim_start_matches('/'))
+            );
+        }
+
+        let _ = fs::remove_file(file_path);
+    }
+
+    #[test]
+    fn file_path_line_col_suffix_is_ignored_for_url_generation() {
+        let file_path = unique_temp_path("with-line-col.rs");
+        fs::write(&file_path, "fn main() {}").expect("write temp file");
+
+        let token = file_path.to_string_lossy();
+        let expected = classify_link_token(&token).expect("base file path should classify");
+        let with_suffix = format!("{token}:42:10");
+
+        assert_eq!(classify_link_token(&with_suffix), Some(expected));
+
+        let _ = fs::remove_file(file_path);
+    }
+
+    #[test]
+    fn malformed_file_urls_are_rejected() {
+        assert_eq!(classify_link_token("file://relative/path.txt"), None);
+    }
+
+    #[test]
+    fn non_canonicalizable_file_paths_are_rejected() {
+        let missing_path = unique_temp_path("missing-file.txt");
+        let token = missing_path.to_string_lossy();
+
+        assert_eq!(classify_link_token(&token), None);
+    }
 }

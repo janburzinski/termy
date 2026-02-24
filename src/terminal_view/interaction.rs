@@ -1444,6 +1444,7 @@ impl TerminalView {
     fn scroll_to_bottom(&mut self, cx: &mut Context<Self>) {
         if self.active_terminal().scroll_to_bottom() {
             self.mark_terminal_scrollbar_activity(cx);
+            cx.notify();
         }
     }
 

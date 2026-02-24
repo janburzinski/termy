@@ -1222,34 +1222,40 @@ impl Render for TerminalView {
                 container = container.child(
                     div()
                         .id(("toast", toast_id))
-                        .w(px(320.0))
+                        .max_w(px(480.0))
                         .mt(px(slide_offset))
                         .rounded_lg()
                         .bg(bg)
                         .border_1()
                         .border_color(border)
                         .shadow_md()
-                        .overflow_hidden()
                         .child(
                             div()
-                                .w_full()
                                 .px(px(14.0))
                                 .py(px(12.0))
                                 .flex()
-                                .items_center()
+                                .items_start()
                                 .gap(px(10.0))
                                 // Icon
-                                .child(div().text_size(px(14.0)).text_color(accent).child(icon))
-                                // Message
                                 .child(
                                     div()
-                                        .flex_1()
+                                        .flex_shrink_0()
+                                        .text_size(px(14.0))
+                                        .text_color(accent)
+                                        .mt(px(1.0))
+                                        .child(icon),
+                                )
+                                // Message - max width accounts for icon (24px) + copy btn (68px) + gaps (20px) + padding (28px)
+                                .child(
+                                    div()
+                                        .max_w(px(340.0))
                                         .text_size(px(13.0))
                                         .text_color(text)
                                         .child(toast_message.clone()),
                                 )
                                 .child(
                                     div()
+                                        .flex_shrink_0()
                                         .w(px(68.0))
                                         .h(px(24.0))
                                         .flex()
