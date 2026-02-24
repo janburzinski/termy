@@ -21,9 +21,6 @@ struct TabStripPalette {
     tabbar_new_tab_hover_border: gpui::Rgba,
     tabbar_new_tab_text: gpui::Rgba,
     tabbar_new_tab_hover_text: gpui::Rgba,
-    tab_overflow_fade_soft: gpui::Rgba,
-    tab_overflow_fade_mid: gpui::Rgba,
-    tab_overflow_fade_strong: gpui::Rgba,
 }
 
 #[cfg(test)]
@@ -226,12 +223,6 @@ impl TerminalView {
         tabbar_new_tab_text.a = 0.9;
         let mut tabbar_new_tab_hover_text = colors.cursor;
         tabbar_new_tab_hover_text.a = 0.98;
-        let mut tab_overflow_fade_soft = tabbar_bg;
-        tab_overflow_fade_soft.a = self.scaled_chrome_alpha(0.18);
-        let mut tab_overflow_fade_mid = tabbar_bg;
-        tab_overflow_fade_mid.a = self.scaled_chrome_alpha(0.28);
-        let mut tab_overflow_fade_strong = tabbar_bg;
-        tab_overflow_fade_strong.a = self.scaled_chrome_alpha(0.38);
 
         TabStripPalette {
             tab_stroke_color,
@@ -249,9 +240,6 @@ impl TerminalView {
             tabbar_new_tab_hover_border,
             tabbar_new_tab_text,
             tabbar_new_tab_hover_text,
-            tab_overflow_fade_soft,
-            tab_overflow_fade_mid,
-            tab_overflow_fade_strong,
         }
     }
 
@@ -836,25 +824,6 @@ impl TerminalView {
             colors,
             cx,
         );
-
-        let left_overflow_indicator = state.overflow_state.left.then(|| {
-            Self::render_overflow_indicator(
-                "tabs-overflow-left",
-                true,
-                palette.tab_overflow_fade_soft,
-                palette.tab_overflow_fade_mid,
-                palette.tab_overflow_fade_strong,
-            )
-        });
-        let right_overflow_indicator = state.overflow_state.right.then(|| {
-            Self::render_overflow_indicator(
-                "tabs-overflow-right",
-                false,
-                palette.tab_overflow_fade_soft,
-                palette.tab_overflow_fade_mid,
-                palette.tab_overflow_fade_strong,
-            )
-        });
         let show_gutter_divider = Self::should_render_gutter_divider(state.overflow_state);
 
         div()
@@ -891,9 +860,7 @@ impl TerminalView {
                             .overflow_x_scroll()
                             .track_scroll(&self.tab_strip.scroll_handle)
                             .child(tabs_scroll_content),
-                    )
-                    .children(left_overflow_indicator)
-                    .children(right_overflow_indicator),
+                    ),
             )
             .children((state.geometry.gutter_width > 0.0).then(|| {
                 Self::render_gutter_lane(
@@ -917,85 +884,4 @@ impl TerminalView {
             .into_any_element()
     }
 
-    fn render_overflow_indicator(
-        id: &'static str,
-        left_side: bool,
-        soft: gpui::Rgba,
-        mid: gpui::Rgba,
-        strong: gpui::Rgba,
-    ) -> AnyElement {
-        let lane = if left_side {
-            div()
-                .id(id)
-                .absolute()
-                .top_0()
-                .left_0()
-                .bottom_0()
-                .w(px(9.0))
-                .child(
-                    div()
-                        .absolute()
-                        .left_0()
-                        .top_0()
-                        .bottom_0()
-                        .w(px(3.0))
-                        .bg(strong),
-                )
-                .child(
-                    div()
-                        .absolute()
-                        .left(px(3.0))
-                        .top_0()
-                        .bottom_0()
-                        .w(px(3.0))
-                        .bg(mid),
-                )
-                .child(
-                    div()
-                        .absolute()
-                        .left(px(6.0))
-                        .top_0()
-                        .bottom_0()
-                        .w(px(3.0))
-                        .bg(soft),
-                )
-        } else {
-            div()
-                .id(id)
-                .absolute()
-                .top_0()
-                .right_0()
-                .bottom_0()
-                .w(px(9.0))
-                .child(
-                    div()
-                        .absolute()
-                        .right_0()
-                        .top_0()
-                        .bottom_0()
-                        .w(px(3.0))
-                        .bg(strong),
-                )
-                .child(
-                    div()
-                        .absolute()
-                        .right(px(3.0))
-                        .top_0()
-                        .bottom_0()
-                        .w(px(3.0))
-                        .bg(mid),
-                )
-                .child(
-                    div()
-                        .absolute()
-                        .right(px(6.0))
-                        .top_0()
-                        .bottom_0()
-                        .w(px(3.0))
-                        .bg(soft),
-                )
-        };
-
-        lane.into_any_element()
-    }
 }
