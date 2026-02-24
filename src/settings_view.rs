@@ -1863,7 +1863,6 @@ impl SettingsWindow {
 
         let cmd_only = event.keystroke.modifiers.secondary()
             && !event.keystroke.modifiers.alt
-            && !event.keystroke.modifiers.control
             && !event.keystroke.modifiers.function;
 
         if self.active_input.is_none() && !self.sidebar_search_active {
