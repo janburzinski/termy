@@ -33,7 +33,8 @@ mod tests {
             TabStripOverflowState {
                 left: false,
                 right: false,
-            }
+            },
+            false,
         ));
     }
 
@@ -43,7 +44,8 @@ mod tests {
             TabStripOverflowState {
                 left: false,
                 right: true,
-            }
+            },
+            false,
         ));
     }
 
@@ -53,7 +55,8 @@ mod tests {
             TabStripOverflowState {
                 left: true,
                 right: true,
-            }
+            },
+            false,
         ));
     }
 
@@ -63,8 +66,103 @@ mod tests {
             TabStripOverflowState {
                 left: true,
                 right: false,
-            }
+            },
+            false,
         ));
+    }
+
+    #[test]
+    fn left_inset_divider_hides_without_left_overflow() {
+        assert!(!TerminalView::should_render_left_inset_divider(
+            TabStripOverflowState {
+                left: false,
+                right: true,
+            },
+            false,
+        ));
+        assert!(!TerminalView::should_render_left_inset_divider(
+            TabStripOverflowState {
+                left: false,
+                right: false,
+            },
+            false,
+        ));
+    }
+
+    #[test]
+    fn left_inset_divider_shows_when_left_overflow_exists() {
+        assert!(TerminalView::should_render_left_inset_divider(
+            TabStripOverflowState {
+                left: true,
+                right: true,
+            },
+            false,
+        ));
+        assert!(TerminalView::should_render_left_inset_divider(
+            TabStripOverflowState {
+                left: true,
+                right: false,
+            },
+            false,
+        ));
+    }
+
+    #[test]
+    fn gutter_divider_hides_when_tab_boundary_already_occupies_right_edge() {
+        assert!(!TerminalView::should_render_gutter_divider(
+            TabStripOverflowState {
+                left: false,
+                right: true,
+            },
+            true,
+        ));
+    }
+
+    #[test]
+    fn left_inset_divider_hides_when_tab_boundary_already_occupies_left_edge() {
+        assert!(!TerminalView::should_render_left_inset_divider(
+            TabStripOverflowState {
+                left: true,
+                right: true,
+            },
+            true,
+        ));
+    }
+
+    #[test]
+    fn edge_divider_collision_detects_fractional_overlap_on_both_edges() {
+        let layout = chrome::compute_tab_chrome_layout(
+            [100.0],
+            chrome::TabChromeInput {
+                active_index: Some(0),
+                tabbar_height: TABBAR_HEIGHT,
+                tab_item_height: TAB_ITEM_HEIGHT,
+                horizontal_padding: TAB_HORIZONTAL_PADDING,
+                tab_item_gap: TAB_ITEM_GAP,
+            },
+        );
+
+        let collisions = TerminalView::edge_divider_collision_state(&layout, -0.49, 100.0);
+        assert!(collisions.left);
+        assert!(collisions.right);
+    }
+
+    #[test]
+    fn edge_divider_collision_ignores_fractional_non_overlap_on_both_edges() {
+        let layout = chrome::compute_tab_chrome_layout(
+            [100.0],
+            chrome::TabChromeInput {
+                active_index: Some(0),
+                tabbar_height: TABBAR_HEIGHT,
+                tab_item_height: TAB_ITEM_HEIGHT,
+                horizontal_padding: TAB_HORIZONTAL_PADDING,
+                tab_item_gap: TAB_ITEM_GAP,
+            },
+        );
+
+        let collisions = TerminalView::edge_divider_collision_state(&layout, -1.01, 100.0);
+        assert!(!collisions.left);
+        assert!(!collisions.right);
     }
 }
 
@@ -73,6 +171,12 @@ struct TabStripRenderState {
     content_width: f32,
     overflow_state: TabStripOverflowState,
     chrome_layout: chrome::TabChromeLayout,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+struct DividerCollisionState {
+    left: bool,
+    right: bool,
 }
 
 struct TabItemRenderInput {
@@ -89,6 +193,43 @@ struct TabItemRenderInput {
 }
 
 impl TerminalView {
+    fn edge_divider_collision_state(
+        layout: &chrome::TabChromeLayout,
+        scroll_offset_x: f32,
+        tabs_viewport_width: f32,
+    ) -> DividerCollisionState {
+        let left_divider_start_col = 0_i32;
+        let left_divider_end_col = (TAB_STROKE_THICKNESS.ceil() as i32).max(1);
+        let right_divider_x = (tabs_viewport_width - TAB_STROKE_THICKNESS).max(0.0);
+        let right_divider_start_col = right_divider_x.floor() as i32;
+        let right_divider_end_col = ((right_divider_x + TAB_STROKE_THICKNESS).ceil() as i32)
+            .max(right_divider_start_col + 1);
+
+        let mut collisions = DividerCollisionState::default();
+
+        for stroke in &layout.boundary_strokes {
+            let boundary_left = stroke.x + scroll_offset_x;
+            let boundary_start_col = boundary_left.floor() as i32;
+            let boundary_end_col =
+                ((boundary_left + TAB_STROKE_THICKNESS).ceil() as i32).max(boundary_start_col + 1);
+
+            if boundary_start_col < left_divider_end_col && boundary_end_col > left_divider_start_col {
+                collisions.left = true;
+            }
+            if boundary_start_col < right_divider_end_col
+                && boundary_end_col > right_divider_start_col
+            {
+                collisions.right = true;
+            }
+
+            if collisions.left && collisions.right {
+                break;
+            }
+        }
+
+        collisions
+    }
+
     fn measure_text_width(
         &mut self,
         window: &Window,
@@ -392,7 +533,7 @@ impl TerminalView {
             .children(show_divider.then(|| {
                 div()
                     .absolute()
-                    .left(px(((gutter_width - TAB_STROKE_THICKNESS) * 0.5).max(0.0)))
+                    .left(px(-TAB_STROKE_THICKNESS))
                     .top(px(TAB_STROKE_THICKNESS))
                     .bottom_0()
                     .w(px(TAB_STROKE_THICKNESS))
@@ -401,8 +542,18 @@ impl TerminalView {
             .into_any_element()
     }
 
-    fn should_render_gutter_divider(overflow: TabStripOverflowState) -> bool {
-        overflow.right || !overflow.left
+    fn should_render_gutter_divider(
+        overflow: TabStripOverflowState,
+        boundary_at_viewport_right: bool,
+    ) -> bool {
+        (overflow.right || !overflow.left) && !boundary_at_viewport_right
+    }
+
+    fn should_render_left_inset_divider(
+        overflow: TabStripOverflowState,
+        boundary_at_viewport_left: bool,
+    ) -> bool {
+        overflow.left && !boundary_at_viewport_left
     }
 
     fn render_baseline_segments(
@@ -829,7 +980,19 @@ impl TerminalView {
             colors,
             cx,
         );
-        let show_gutter_divider = Self::should_render_gutter_divider(state.overflow_state);
+        let scroll_offset_x: f32 = self.tab_strip.scroll_handle.offset().x.into();
+        let divider_collisions = Self::edge_divider_collision_state(
+            &state.chrome_layout,
+            scroll_offset_x,
+            state.geometry.tabs_viewport_width,
+        );
+
+        let show_gutter_divider =
+            Self::should_render_gutter_divider(state.overflow_state, divider_collisions.right);
+        let show_left_inset_divider = Self::should_render_left_inset_divider(
+            state.overflow_state,
+            divider_collisions.left,
+        );
 
         div()
             .w_full()
@@ -865,7 +1028,16 @@ impl TerminalView {
                             .overflow_x_scroll()
                             .track_scroll(&self.tab_strip.scroll_handle)
                             .child(tabs_scroll_content),
-                    ),
+                    )
+                    .children(show_left_inset_divider.then(|| {
+                        div()
+                            .absolute()
+                            .left_0()
+                            .top(px(TAB_STROKE_THICKNESS))
+                            .bottom_0()
+                            .w(px(TAB_STROKE_THICKNESS))
+                            .bg(palette.tab_stroke_color)
+                    })),
             )
             .children((state.geometry.gutter_width > 0.0).then(|| {
                 Self::render_gutter_lane(
