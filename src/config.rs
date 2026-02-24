@@ -26,8 +26,6 @@ theme = termy\n\
 term = xterm-256color\n\
 # Startup directory for new terminal sessions (~ supported)\n\
 # working_dir = ~/Documents\n\
-# Show compact tab strip (stays visible with one tab)\n\
-# use_tabs = true\n\
 # Warn before quitting when tabs are busy (running command/fullscreen TUI)\n\
 # warn_on_quit_with_running_process = true\n\
 # Tab title mode. Supported values: smart, shell, explicit, static\n\
@@ -388,7 +386,6 @@ pub struct AppConfig {
     pub theme: ThemeId,
     pub working_dir: Option<String>,
     pub working_dir_fallback: WorkingDirFallback,
-    pub use_tabs: bool,
     pub warn_on_quit_with_running_process: bool,
     pub tab_title: TabTitleConfig,
     pub shell: Option<String>,
@@ -426,7 +423,6 @@ impl Default for AppConfig {
             theme: DEFAULT_THEME_ID.to_string(),
             working_dir: None,
             working_dir_fallback: WorkingDirFallback::default(),
-            use_tabs: true,
             warn_on_quit_with_running_process: DEFAULT_WARN_ON_QUIT_WITH_RUNNING_PROCESS,
             tab_title: TabTitleConfig::default(),
             shell: None,
@@ -509,12 +505,6 @@ impl AppConfig {
             {
                 if let Some(fallback) = WorkingDirFallback::from_str(value) {
                     config.working_dir_fallback = fallback;
-                }
-            }
-
-            if key.eq_ignore_ascii_case("use_tabs") {
-                if let Some(use_tabs) = parse_bool(value) {
-                    config.use_tabs = use_tabs;
                 }
             }
 

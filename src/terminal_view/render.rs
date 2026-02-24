@@ -1,5 +1,5 @@
 use super::scrollbar as terminal_scrollbar;
-use super::tabs::{TabDropMarkerSide, TabStripOverflowState};
+use super::tabs::TabDropMarkerSide;
 use super::*;
 use crate::ui::scrollbar::{self as ui_scrollbar, ScrollbarPaintStyle};
 
@@ -531,20 +531,10 @@ impl Render for TerminalView {
         });
 
         let focus_handle = self.focus_handle.clone();
-        let show_tab_bar = self.show_tab_bar();
-        let tabs_in_titlebar = self.tabs_in_titlebar();
-        let tabbar_action_rail_width = if show_tab_bar {
-            TABBAR_ACTION_RAIL_WIDTH
-        } else {
-            0.0
-        };
+        let tabbar_action_rail_width = TABBAR_ACTION_RAIL_WIDTH;
         let tab_strip_viewport_width = self.tab_strip_drag_viewport_width(window);
         self.sync_tab_display_widths_for_viewport(tab_strip_viewport_width);
-        let tab_strip_overflow_state = if show_tab_bar {
-            self.tab_strip_overflow_state()
-        } else {
-            TabStripOverflowState::default()
-        };
+        let tab_strip_overflow_state = self.tab_strip_overflow_state();
         let titlebar_left_padding = if cfg!(target_os = "macos") {
             TOP_STRIP_MACOS_TRAFFIC_LIGHT_PADDING
         } else {
@@ -554,14 +544,7 @@ impl Render for TerminalView {
         let mut terminal_surface_bg = colors.background;
         terminal_surface_bg.a = self.scaled_background_alpha(terminal_surface_bg.a);
         let titlebar_bg = terminal_surface_bg;
-        let mut titlebar_brand_text = colors.foreground;
-        titlebar_brand_text.a = 0.9;
-        let mut titlebar_context_text = colors.foreground;
-        titlebar_context_text.a = 0.62;
-        let mut tabbar_bg = terminal_surface_bg;
-        if !show_tab_bar {
-            tabbar_bg.a = 0.0;
-        }
+        let tabbar_bg = terminal_surface_bg;
         let tab_stroke_color = tab_chrome::resolve_tab_stroke_color(
             tabbar_bg,
             colors.foreground,
@@ -604,28 +587,23 @@ impl Render for TerminalView {
         let mut selection_bg = colors.cursor;
         selection_bg.a = SELECTION_BG_ALPHA;
         let selection_fg = colors.background;
-        let active_context_label = self.active_context_title().to_string();
         let hovered_link_range = self
             .hovered_link
             .as_ref()
             .map(|link| (link.row, link.start_col, link.end_col));
         let active_tab_index = (self.active_tab < self.tabs.len()).then_some(self.active_tab);
-        let tab_chrome_layout = show_tab_bar.then(|| {
-            tab_chrome::compute_tab_chrome_layout(
-                self.tabs.iter().map(|tab| tab.display_width),
-                tab_chrome::TabChromeInput {
-                    active_index: active_tab_index,
-                    tabbar_height: TABBAR_HEIGHT,
-                    tab_item_height: TAB_ITEM_HEIGHT,
-                    horizontal_padding: TAB_HORIZONTAL_PADDING,
-                    tab_item_gap: TAB_ITEM_GAP,
-                },
-            )
-        });
+        let tab_chrome_layout = tab_chrome::compute_tab_chrome_layout(
+            self.tabs.iter().map(|tab| tab.display_width),
+            tab_chrome::TabChromeInput {
+                active_index: active_tab_index,
+                tabbar_height: TABBAR_HEIGHT,
+                tab_item_height: TAB_ITEM_HEIGHT,
+                horizontal_padding: TAB_HORIZONTAL_PADDING,
+                tab_item_gap: TAB_ITEM_GAP,
+            },
+        );
         debug_assert!(
-            tab_chrome_layout
-                .as_ref()
-                .is_none_or(|layout| layout.tab_strokes.len() == self.tabs.len())
+            tab_chrome_layout.tab_strokes.len() == self.tabs.len()
         );
         let render_tab_stroke = |stroke: tab_chrome::StrokeRect| {
             div()
@@ -640,7 +618,7 @@ impl Render for TerminalView {
             .id("tabs-scroll-content")
             .flex_1()
             .min_w(px(0.0))
-            .h(px(if show_tab_bar { TABBAR_HEIGHT } else { 0.0 }))
+            .h(px(TABBAR_HEIGHT))
             .flex()
             .relative()
             .items_end()
@@ -671,18 +649,14 @@ impl Render for TerminalView {
                 }
             }));
 
-        if show_tab_bar {
-            let tab_chrome_layout = tab_chrome_layout
-                .as_ref()
-                .expect("tab chrome layout must exist when tab bar is visible");
-            tabs_scroll_content = tabs_scroll_content.child(
-                div()
-                    .id("tabs-left-padding-spacer")
-                    .flex_none()
-                    .w(px(TAB_HORIZONTAL_PADDING))
-                    .h(px(TABBAR_HEIGHT)),
-            );
-            for (index, tab) in self.tabs.iter().enumerate() {
+        tabs_scroll_content = tabs_scroll_content.child(
+            div()
+                .id("tabs-left-padding-spacer")
+                .flex_none()
+                .w(px(TAB_HORIZONTAL_PADDING))
+                .h(px(TABBAR_HEIGHT)),
+        );
+        for (index, tab) in self.tabs.iter().enumerate() {
                 let switch_tab_index = index;
                 let hover_tab_index = index;
                 let close_tab_index = index;
@@ -883,43 +857,36 @@ impl Render for TerminalView {
                         .children(drop_marker),
                 );
             }
-            tabs_scroll_content = tabs_scroll_content.child(
-                div()
-                    .id("tabs-right-padding-spacer")
-                    .flex_none()
-                    .w(px(TAB_HORIZONTAL_PADDING))
-                    .h(px(TABBAR_HEIGHT)),
-            );
-        }
+        tabs_scroll_content = tabs_scroll_content.child(
+            div()
+                .id("tabs-right-padding-spacer")
+                .flex_none()
+                .w(px(TAB_HORIZONTAL_PADDING))
+                .h(px(TABBAR_HEIGHT)),
+        );
 
-        if let Some(layout) = tab_chrome_layout.as_ref() {
-            for segment in &layout.baseline_strokes {
-                tabs_scroll_content = tabs_scroll_content.child(render_tab_stroke(*segment));
-            }
-            tabs_scroll_content = tabs_scroll_content.child(
-                div()
-                    .id("tabs-baseline-tail-filler")
-                    .flex_1()
-                    .min_w(px(0.0))
-                    .h(px(TABBAR_HEIGHT))
-                    .relative()
-                    .child(
-                        div()
-                            .absolute()
-                            .left_0()
-                            .right_0()
-                            .top(px(layout.baseline_y))
-                            .h(px(TAB_STROKE_THICKNESS))
-                            .bg(tab_stroke_color),
-                    ),
-            );
+        for segment in &tab_chrome_layout.baseline_strokes {
+            tabs_scroll_content = tabs_scroll_content.child(render_tab_stroke(*segment));
         }
-        let tab_baseline_y = tab_chrome_layout
-            .as_ref()
-            .map_or(TABBAR_HEIGHT - TAB_STROKE_THICKNESS, |layout| {
-                layout.baseline_y
-            });
-        let left_overflow_indicator = (show_tab_bar && tab_strip_overflow_state.left).then(|| {
+        tabs_scroll_content = tabs_scroll_content.child(
+            div()
+                .id("tabs-baseline-tail-filler")
+                .flex_1()
+                .min_w(px(0.0))
+                .h(px(TABBAR_HEIGHT))
+                .relative()
+                .child(
+                    div()
+                        .absolute()
+                        .left_0()
+                        .right_0()
+                        .top(px(tab_chrome_layout.baseline_y))
+                        .h(px(TAB_STROKE_THICKNESS))
+                        .bg(tab_stroke_color),
+                ),
+        );
+        let tab_baseline_y = tab_chrome_layout.baseline_y;
+        let left_overflow_indicator = tab_strip_overflow_state.left.then(|| {
             div()
                 .id("tabs-overflow-left")
                 .absolute()
@@ -956,8 +923,7 @@ impl Render for TerminalView {
                 )
                 .into_any_element()
         });
-        let right_overflow_indicator =
-            (show_tab_bar && tab_strip_overflow_state.right).then(|| {
+        let right_overflow_indicator = tab_strip_overflow_state.right.then(|| {
                 div()
                     .id("tabs-overflow-right")
                     .absolute()
@@ -997,7 +963,7 @@ impl Render for TerminalView {
 
         let tabs_row = div()
             .w_full()
-            .h(px(if show_tab_bar { TABBAR_HEIGHT } else { 0.0 }))
+            .h(px(TABBAR_HEIGHT))
             .relative()
             .child(
                 div()
@@ -1016,7 +982,7 @@ impl Render for TerminalView {
                             .children(left_overflow_indicator)
                             .children(right_overflow_indicator),
                     )
-                    .children(show_tab_bar.then(|| {
+                    .child(
                         div()
                             .id("tabbar-action-rail")
                             .relative()
@@ -1037,8 +1003,8 @@ impl Render for TerminalView {
                                         return;
                                     }
 
-                                    let (pointer_x, viewport_width) = this
-                                        .tab_strip_pointer_x_from_window_x(
+                                    let (pointer_x, viewport_width) =
+                                        this.tab_strip_pointer_x_from_window_x(
                                             window,
                                             event.position.x,
                                         );
@@ -1066,9 +1032,8 @@ impl Render for TerminalView {
                                 tabbar_new_tab_text,
                                 tabbar_new_tab_hover_text,
                                 cx,
-                            ))
-                            .into_any_element()
-                    })),
+                            )),
+                    ),
             );
 
         // Build update banner element (macOS only)
@@ -1155,10 +1120,7 @@ impl Render for TerminalView {
             "Terminal"
         };
         let tabs_row = tabs_row.into_any_element();
-        let (titlebar_element, standalone_tabbar_element): (
-            Option<AnyElement>,
-            Option<AnyElement>,
-        ) = if titlebar_height > 0.0 {
+        let titlebar_element: Option<AnyElement> = (titlebar_height > 0.0).then(|| {
             let titlebar_container = div()
                 .id("titlebar")
                 .w_full()
@@ -1201,113 +1163,32 @@ impl Render for TerminalView {
                 }))
                 .bg(titlebar_bg);
 
-            if tabs_in_titlebar {
-                (
-                    Some(
-                        titlebar_container
-                            .on_mouse_down(
-                                MouseButton::Left,
-                                cx.listener(Self::handle_unified_titlebar_mouse_down),
-                            )
-                            .on_mouse_up(
-                                MouseButton::Left,
-                                cx.listener(Self::handle_unified_titlebar_mouse_up),
-                            )
-                            .on_mouse_up_out(
-                                MouseButton::Left,
-                                cx.listener(Self::handle_unified_titlebar_mouse_up),
-                            )
-                            .child(
-                                div()
-                                    .w_full()
-                                    .h_full()
-                                    .flex()
-                                    .items_end()
-                                    .mt(px(TOP_STRIP_CONTENT_OFFSET_Y))
-                                    .pl(px(titlebar_left_padding))
-                                    .pr(px(TOP_STRIP_SIDE_PADDING))
-                                    .child(div().flex_1().h_full().child(tabs_row)),
-                            )
-                            .into_any(),
-                    ),
-                    None,
+            titlebar_container
+                .on_mouse_down(
+                    MouseButton::Left,
+                    cx.listener(Self::handle_unified_titlebar_mouse_down),
                 )
-            } else {
-                (
-                    Some(
-                        titlebar_container
-                            .window_control_area(WindowControlArea::Drag)
-                            .on_mouse_down(
-                                MouseButton::Left,
-                                cx.listener(Self::handle_titlebar_mouse_down),
-                            )
-                            .child(
-                                div()
-                                    .w_full()
-                                    .flex()
-                                    .items_center()
-                                    .mt(px(TOP_STRIP_CONTENT_OFFSET_Y))
-                                    .gap(px(8.0))
-                                    .pl(px(titlebar_left_padding))
-                                    .pr(px(TOP_STRIP_SIDE_PADDING))
-                                    .child(
-                                        div()
-                                            .flex_1()
-                                            .flex()
-                                            .items_center()
-                                            .gap(px(10.0))
-                                            .overflow_x_hidden()
-                                            .child(
-                                                div()
-                                                    .mt(px(TOP_STRIP_TEXT_BASELINE_NUDGE_Y))
-                                                    .text_color(titlebar_brand_text)
-                                                    .text_size(px(TOP_STRIP_BRAND_TEXT_SIZE))
-                                                    .font_weight(FontWeight::MEDIUM)
-                                                    .child("termy"),
-                                            )
-                                            .child(
-                                                div()
-                                                    .mt(px(TOP_STRIP_TEXT_BASELINE_NUDGE_Y))
-                                                    .flex_1()
-                                                    .overflow_x_hidden()
-                                                    .truncate()
-                                                    .text_color(titlebar_context_text)
-                                                    .text_size(px(TOP_STRIP_CONTEXT_TEXT_SIZE))
-                                                    .child(active_context_label),
-                                            ),
-                                    ),
-                            )
-                            .into_any(),
-                    ),
-                    Some(
-                        div()
-                            .id("tabbar")
-                            .w_full()
-                            .h(px(self.tab_bar_height()))
-                            .flex_none()
-                            .overflow_hidden()
-                            .bg(tabbar_bg)
-                            .child(tabs_row)
-                            .into_any_element(),
-                    ),
+                .on_mouse_up(
+                    MouseButton::Left,
+                    cx.listener(Self::handle_unified_titlebar_mouse_up),
                 )
-            }
-        } else {
-            (
-                None,
-                Some(
+                .on_mouse_up_out(
+                    MouseButton::Left,
+                    cx.listener(Self::handle_unified_titlebar_mouse_up),
+                )
+                .child(
                     div()
-                        .id("tabbar")
                         .w_full()
-                        .h(px(self.tab_bar_height()))
-                        .flex_none()
-                        .overflow_hidden()
-                        .bg(tabbar_bg)
-                        .child(tabs_row)
-                        .into_any_element(),
-                ),
-            )
-        };
+                        .h_full()
+                        .flex()
+                        .items_end()
+                        .mt(px(TOP_STRIP_CONTENT_OFFSET_Y))
+                        .pl(px(titlebar_left_padding))
+                        .pr(px(TOP_STRIP_SIDE_PADDING))
+                        .child(div().flex_1().h_full().child(tabs_row)),
+                )
+                .into_any()
+        });
         let toast_overlay = if self.toast_manager.active().is_empty() {
             None
         } else {
@@ -1558,7 +1439,6 @@ impl Render for TerminalView {
                 }),
             )
             .children(titlebar_element)
-            .children(standalone_tabbar_element)
             .children(banner_element)
             .child(
                 div()

@@ -14,10 +14,6 @@ pub(super) struct TabStripOverflowState {
 
 impl TerminalView {
     fn tab_strip_origin_x(&self) -> f32 {
-        if !self.tabs_in_titlebar() {
-            return 0.0;
-        }
-
         if cfg!(target_os = "macos") {
             TOP_STRIP_MACOS_TRAFFIC_LIGHT_PADDING
         } else {
@@ -79,15 +75,8 @@ impl TerminalView {
 
     pub(super) fn tab_strip_drag_viewport_width(&self, window: &Window) -> f32 {
         let viewport_width: f32 = window.viewport_size().width.into();
-        if !self.show_tab_bar() {
-            return viewport_width.max(0.0);
-        }
-
-        let tabs_row_width = if self.tabs_in_titlebar() {
-            (viewport_width - self.tab_strip_origin_x() - TOP_STRIP_SIDE_PADDING).max(0.0)
-        } else {
-            viewport_width.max(0.0)
-        };
+        let tabs_row_width =
+            (viewport_width - self.tab_strip_origin_x() - TOP_STRIP_SIDE_PADDING).max(0.0);
 
         (tabs_row_width - TABBAR_ACTION_RAIL_WIDTH).max(0.0)
     }
@@ -122,10 +111,6 @@ impl TerminalView {
     }
 
     pub(super) fn tab_strip_overflow_state(&self) -> TabStripOverflowState {
-        if !self.show_tab_bar() {
-            return TabStripOverflowState::default();
-        }
-
         let offset = self.tab_strip_scroll_handle.offset();
         let scroll_x = -Into::<f32>::into(offset.x);
         let max_scroll: f32 = self.tab_strip_scroll_handle.max_offset().width.into();
@@ -425,10 +410,6 @@ impl TerminalView {
     }
 
     pub(super) fn add_tab(&mut self, cx: &mut Context<Self>) {
-        if !self.use_tabs {
-            return;
-        }
-
         let terminal = Terminal::new(
             TerminalSize::default(),
             self.configured_working_dir.as_deref(),
@@ -506,7 +487,7 @@ impl TerminalView {
     }
 
     pub(super) fn begin_rename_tab(&mut self, index: usize, cx: &mut Context<Self>) {
-        if !self.use_tabs || index >= self.tabs.len() {
+        if index >= self.tabs.len() {
             return;
         }
 

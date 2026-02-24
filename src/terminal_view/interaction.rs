@@ -895,10 +895,6 @@ impl TerminalView {
                 }
             },
             CommandAction::RenameTab => {
-                if !self.use_tabs {
-                    return;
-                }
-
                 self.begin_rename_tab(self.active_tab, cx);
                 termy_toast::info("Rename mode enabled");
             }
@@ -1606,27 +1602,6 @@ impl TerminalView {
         cx.notify();
     }
 
-    pub(super) fn handle_titlebar_mouse_down(
-        &mut self,
-        event: &MouseDownEvent,
-        window: &mut Window,
-        _cx: &mut Context<Self>,
-    ) {
-        if event.button != MouseButton::Left {
-            return;
-        }
-
-        if event.click_count == 2 {
-            #[cfg(target_os = "macos")]
-            window.titlebar_double_click();
-            #[cfg(not(target_os = "macos"))]
-            window.zoom_window();
-            return;
-        }
-
-        window.start_window_move();
-    }
-
     fn titlebar_left_padding_for_platform() -> f32 {
         if cfg!(target_os = "macos") {
             TOP_STRIP_MACOS_TRAFFIC_LIGHT_PADDING
@@ -1660,10 +1635,6 @@ impl TerminalView {
     }
 
     fn unified_titlebar_tab_interactive_hit_test(&self, x: f32, y: f32, window: &Window) -> bool {
-        if !self.show_tab_bar() {
-            return false;
-        }
-
         let row_start_x = Self::titlebar_left_padding_for_platform();
         let viewport_width: f32 = window.viewport_size().width.into();
         let tabs_viewport_width = self.tab_strip_drag_viewport_width(window);
@@ -1825,11 +1796,11 @@ impl TerminalView {
     }
 
     pub(super) fn tab_bar_height(&self) -> f32 {
-        Self::tab_bar_height_for_mode(self.show_tab_bar(), self.tabs_in_titlebar())
+        0.0
     }
 
     pub(super) fn titlebar_height(&self) -> f32 {
-        Self::titlebar_height_for_mode(self.tabs_in_titlebar())
+        TITLEBAR_HEIGHT.max(TABBAR_HEIGHT)
     }
 
     pub(super) fn update_banner_height(&self) -> f32 {
@@ -1842,22 +1813,6 @@ impl TerminalView {
 
     pub(super) fn chrome_height(&self) -> f32 {
         self.titlebar_height() + self.tab_bar_height() + self.update_banner_height()
-    }
-
-    fn tab_bar_height_for_mode(show_tab_bar: bool, tabs_in_titlebar: bool) -> f32 {
-        if show_tab_bar && !tabs_in_titlebar {
-            TABBAR_HEIGHT
-        } else {
-            0.0
-        }
-    }
-
-    fn titlebar_height_for_mode(tabs_in_titlebar: bool) -> f32 {
-        if tabs_in_titlebar {
-            TITLEBAR_HEIGHT.max(TABBAR_HEIGHT)
-        } else {
-            TITLEBAR_HEIGHT
-        }
     }
 }
 
@@ -1938,38 +1893,12 @@ mod tests {
         );
     }
 
-    #[cfg(target_os = "macos")]
     #[test]
-    fn tabs_in_titlebar_is_enabled_when_tabs_are_enabled_on_macos() {
-        assert!(TerminalView::tabs_in_titlebar_for_use_tabs(true));
-        assert!(!TerminalView::tabs_in_titlebar_for_use_tabs(false));
-    }
-
-    #[cfg(not(target_os = "macos"))]
-    #[test]
-    fn tabs_in_titlebar_is_disabled_outside_macos() {
-        assert!(!TerminalView::tabs_in_titlebar_for_use_tabs(true));
-        assert!(!TerminalView::tabs_in_titlebar_for_use_tabs(false));
-    }
-
-    #[cfg(target_os = "macos")]
-    #[test]
-    fn chrome_height_uses_single_row_when_tabs_are_in_titlebar() {
-        let tabs_in_titlebar = TerminalView::tabs_in_titlebar_for_use_tabs(true);
-        let titlebar_height = TerminalView::titlebar_height_for_mode(tabs_in_titlebar);
-        let tab_bar_height = TerminalView::tab_bar_height_for_mode(true, tabs_in_titlebar);
-        assert_eq!(tab_bar_height, 0.0);
+    fn chrome_height_uses_single_row_across_platforms() {
+        let titlebar_height = TITLEBAR_HEIGHT.max(TABBAR_HEIGHT);
+        let tab_bar_height = 0.0;
         assert_eq!(titlebar_height, TITLEBAR_HEIGHT.max(TABBAR_HEIGHT));
-    }
-
-    #[cfg(not(target_os = "macos"))]
-    #[test]
-    fn chrome_height_keeps_stacked_rows_outside_macos() {
-        let tabs_in_titlebar = TerminalView::tabs_in_titlebar_for_use_tabs(true);
-        let titlebar_height = TerminalView::titlebar_height_for_mode(tabs_in_titlebar);
-        let tab_bar_height = TerminalView::tab_bar_height_for_mode(true, tabs_in_titlebar);
-        assert_eq!(titlebar_height, TITLEBAR_HEIGHT);
-        assert_eq!(tab_bar_height, TABBAR_HEIGHT);
+        assert_eq!(tab_bar_height, 0.0);
     }
 
     #[test]

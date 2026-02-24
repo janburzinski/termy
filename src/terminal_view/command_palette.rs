@@ -99,7 +99,7 @@ impl TerminalView {
 
     fn command_palette_items(&self) -> Vec<CommandPaletteItem> {
         match self.command_palette_mode {
-            CommandPaletteMode::Commands => CommandAction::palette_entries(self.use_tabs)
+            CommandPaletteMode::Commands => CommandAction::palette_entries()
                 .into_iter()
                 .map(|entry| CommandPaletteItem::command(entry.title, entry.keywords, entry.action))
                 .collect(),

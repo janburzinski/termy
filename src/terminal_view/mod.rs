@@ -13,7 +13,7 @@ use gpui::{
     Focusable, Font, FontWeight, InteractiveElement, IntoElement, KeyDownEvent, MouseButton,
     MouseDownEvent, MouseMoveEvent, MouseUpEvent, ParentElement, Pixels, Render, ScrollHandle,
     ScrollWheelEvent, SharedString, Size, StatefulInteractiveElement, Styled, TouchPhase,
-    UniformListScrollHandle, WeakEntity, Window, WindowBackgroundAppearance, WindowControlArea,
+    UniformListScrollHandle, WeakEntity, Window, WindowBackgroundAppearance,
     div, point, px,
 };
 use std::{
@@ -64,9 +64,6 @@ const TOP_STRIP_MACOS_TRAFFIC_LIGHT_PADDING: f32 = 78.0;
 #[cfg(not(macos_sdk_26))]
 const TOP_STRIP_MACOS_TRAFFIC_LIGHT_PADDING: f32 = 71.0;
 const TOP_STRIP_CONTENT_OFFSET_Y: f32 = 0.0;
-const TOP_STRIP_BRAND_TEXT_SIZE: f32 = 13.0;
-const TOP_STRIP_CONTEXT_TEXT_SIZE: f32 = 13.0;
-const TOP_STRIP_TEXT_BASELINE_NUDGE_Y: f32 = 0.0;
 const TAB_HORIZONTAL_PADDING: f32 = 8.0;
 const TAB_ITEM_HEIGHT: f32 = 32.0;
 const TAB_ITEM_GAP: f32 = 0.0;
@@ -504,7 +501,6 @@ pub struct TerminalView {
     focus_handle: FocusHandle,
     theme_id: String,
     colors: TerminalColors,
-    use_tabs: bool,
     inactive_tab_scrollback: Option<usize>,
     warn_on_quit_with_running_process: bool,
     tab_title: TabTitleConfig,
@@ -991,7 +987,6 @@ impl TerminalView {
             focus_handle,
             theme_id,
             colors,
-            use_tabs: config.use_tabs,
             inactive_tab_scrollback: config.inactive_tab_scrollback,
             warn_on_quit_with_running_process: config.warn_on_quit_with_running_process,
             tab_title,
@@ -1091,7 +1086,6 @@ impl TerminalView {
         keybindings::install_keybindings(cx, &config);
         self.theme_id = config.theme.clone();
         self.colors = TerminalColors::from_theme(&config.theme, &config.colors);
-        self.use_tabs = config.use_tabs;
         self.inactive_tab_scrollback = config.inactive_tab_scrollback;
         self.warn_on_quit_with_running_process = config.warn_on_quit_with_running_process;
         self.tab_title = config.tab_title.clone();
@@ -1227,16 +1221,12 @@ impl TerminalView {
                         }
                     }
                     TerminalEvent::Title(title) => {
-                        if self.apply_terminal_title(index, &title, cx)
-                            && (index == active_tab || self.show_tab_bar())
-                        {
+                        if self.apply_terminal_title(index, &title, cx) {
                             should_redraw = true;
                         }
                     }
                     TerminalEvent::ResetTitle => {
-                        if self.clear_terminal_titles(index)
-                            && (index == active_tab || self.show_tab_bar())
-                        {
+                        if self.clear_terminal_titles(index) {
                             should_redraw = true;
                         }
                     }
@@ -1267,36 +1257,8 @@ impl TerminalView {
         }
     }
 
-    fn show_tab_bar(&self) -> bool {
-        self.use_tabs
-    }
-
-    pub(super) fn tabs_in_titlebar_for_use_tabs(use_tabs: bool) -> bool {
-        #[cfg(target_os = "macos")]
-        {
-            use_tabs
-        }
-        #[cfg(not(target_os = "macos"))]
-        {
-            let _ = use_tabs;
-            false
-        }
-    }
-
-    pub(super) fn tabs_in_titlebar(&self) -> bool {
-        Self::tabs_in_titlebar_for_use_tabs(self.show_tab_bar())
-    }
-
-    fn active_context_title(&self) -> &str {
-        self.tabs
-            .get(self.active_tab)
-            .map(|tab| tab.title.trim())
-            .filter(|title| !title.is_empty())
-            .unwrap_or_else(|| self.fallback_title())
-    }
-
     pub(super) fn scroll_active_tab_into_view(&self) {
-        if self.show_tab_bar() && self.active_tab < self.tabs.len() {
+        if self.active_tab < self.tabs.len() {
             // render.rs inserts the left padding spacer as child index 0 in the tracked
             // tab strip, so tab N is rendered at scroll item N + TAB_STRIP_LEFT_PADDING_ITEM_OFFSET.
             self.tab_strip_scroll_handle.scroll_to_item(

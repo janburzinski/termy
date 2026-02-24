@@ -183,7 +183,6 @@ fn get_show_config_content() -> Vec<String> {
         lines.push("  padding_x = 12".to_string());
         lines.push("  padding_y = 8".to_string());
         lines.push("  scrollback_history = 10000".to_string());
-        lines.push("  use_tabs = true".to_string());
         return lines;
     }
 
@@ -480,7 +479,7 @@ fn get_validate_config_content() -> Vec<String> {
                     let valid_keys = [
                         "theme", "font_family", "font_size", "term", "cursor_style",
                         "cursor_blink", "background_opacity", "padding_x", "padding_y",
-                        "scrollback_history", "use_tabs", "keybind",
+                        "scrollback_history", "keybind",
                     ];
 
                     if !valid_keys.contains(&key) {

@@ -99,7 +99,7 @@ fn main() {
         let window_height = app_config.window_height;
         let startup_config = app_config;
         #[cfg(target_os = "macos")]
-        let main_window_is_movable = !startup_config.use_tabs;
+        let main_window_is_movable = false;
         #[cfg(not(target_os = "macos"))]
         let main_window_is_movable = true;
         #[cfg(target_os = "windows")]

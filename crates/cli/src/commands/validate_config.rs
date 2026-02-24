@@ -21,7 +21,6 @@ const VALID_KEYS: &[&str] = &[
     "terminal_scrollbar_style",
     "scrollback_history",
     "inactive_tab_scrollback",
-    "use_tabs",
     "warn_on_quit_with_running_process",
     "command_palette_show_keybinds",
     "keybind",
@@ -165,7 +164,7 @@ pub fn run() {
                         errors.push(format!("Line {}: cursor_style must be 'line' or 'block'", line_num));
                     }
                 }
-                "cursor_blink" | "background_blur" | "use_tabs" | "warn_on_quit_with_running_process" | "command_palette_show_keybinds" | "tab_title_shell_integration" => {
+                "cursor_blink" | "background_blur" | "warn_on_quit_with_running_process" | "command_palette_show_keybinds" | "tab_title_shell_integration" => {
                     if !["true", "false"].contains(&value.to_lowercase().as_str()) {
                         errors.push(format!("Line {}: {} must be 'true' or 'false'", line_num, key));
                     }
