@@ -433,7 +433,6 @@ impl TerminalView {
                     .flex_none()
                     .w(px(tabbar_left_inset_width))
                     .h_full()
-                    .bg(tabbar_bg)
                     .child(
                         div()
                             .absolute()
@@ -453,7 +452,6 @@ impl TerminalView {
                     .min_w(px(0.0))
                     .h_full()
                     .relative()
-                    .bg(tabbar_bg)
                     .child(
                         div()
                             .id("tabs-scroll-viewport")
@@ -476,8 +474,6 @@ impl TerminalView {
                     .flex_none()
                     .w(px(tabbar_gutter_width))
                     .h_full()
-                    .bg(tabbar_bg)
-                    .occlude()
                     .child(
                         div()
                             .absolute()
@@ -505,8 +501,6 @@ impl TerminalView {
                     .flex_none()
                     .w(px(tabbar_action_rail_width))
                     .h_full()
-                    .bg(tabbar_bg)
-                    .occlude()
                     .on_scroll_wheel(cx.listener(Self::handle_tab_strip_action_rail_scroll_wheel))
                     .on_mouse_move(cx.listener(|this, event: &MouseMoveEvent, window, cx| {
                         let hovered_changed = this.tab_strip.hovered_tab.take().is_some()
@@ -559,7 +553,6 @@ impl TerminalView {
                     .flex_none()
                     .w(px(tabbar_right_inset_width))
                     .h_full()
-                    .bg(tabbar_bg)
                     .child(
                         div()
                             .absolute()
