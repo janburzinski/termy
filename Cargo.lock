@@ -5487,7 +5487,7 @@ dependencies = [
 
 [[package]]
 name = "termy"
-version = "0.1.30"
+version = "0.1.31"
 dependencies = [
  "alacritty_terminal",
  "anyhow",
@@ -5573,6 +5573,7 @@ version = "0.1.0"
 dependencies = [
  "alacritty_terminal",
  "anyhow",
+ "dirs 6.0.0",
  "flume",
  "gpui",
 ]
