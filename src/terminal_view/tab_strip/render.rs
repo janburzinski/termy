@@ -804,9 +804,14 @@ impl TerminalView {
         let base_left_inset_width = Self::titlebar_left_padding_for_platform();
         let termy_branding_reserved_width =
             self.termy_branding_reserved_width(window, font_family, font_family_key.as_str());
+        let termy_branding_tab_gap = if termy_branding_reserved_width > f32::EPSILON {
+            TOP_STRIP_TERMY_BRANDING_TAB_GAP
+        } else {
+            0.0
+        };
         let state = self.build_tab_strip_render_state(
             window,
-            base_left_inset_width + termy_branding_reserved_width,
+            base_left_inset_width + termy_branding_reserved_width + termy_branding_tab_gap,
         );
         let palette = self.resolve_tab_strip_palette(colors, tabbar_bg);
         let termy_branding_slot_start_x = base_left_inset_width.min(state.geometry.left_inset_width);
