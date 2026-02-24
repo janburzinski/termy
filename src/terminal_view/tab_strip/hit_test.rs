@@ -162,6 +162,21 @@ mod tests {
     }
 
     #[test]
+    fn interactive_hit_test_excludes_expanded_left_inset_branding_space() {
+        let base_left_inset = TerminalView::titlebar_left_padding_for_platform();
+        let geometry =
+            TerminalView::tab_strip_geometry_for_viewport_with_left_inset(1280.0, base_left_inset + 64.0);
+        let x = geometry.left_inset_width - 1.0;
+        assert!(!TerminalView::unified_titlebar_tab_interactive_hit_test_for_geometry(
+            x,
+            tab_hit_test_y(),
+            geometry,
+            [120.0, 120.0],
+            0.0,
+        ));
+    }
+
+    #[test]
     fn interactive_hit_test_respects_half_open_region_boundaries() {
         let geometry = TerminalView::tab_strip_geometry_for_viewport_width(1280.0);
         let tabs_boundary = geometry.tabs_viewport_end_x();

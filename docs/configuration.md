@@ -83,6 +83,13 @@ Mode presets:
 - Values: `stable`, `active_grow`, `active_grow_sticky`
 - What it does: controls how tab widths react to active state and close-slot reservation.
 
+`show_termy_in_titlebar`
+- Default: `true`
+- Values: `true`/`false`
+- What it does: shows/hides the `termy` label between macOS traffic lights and tabs.
+- Note: visual effect is macOS-only.
+- Note: uses the terminal font family with a compact fixed size.
+
 `tab_title_fallback`
 - Default: `Terminal`
 - Values: non-empty string
@@ -191,6 +198,10 @@ Explicit payload examples:
 `tab_width_mode`
 - Default: `active_grow_sticky`
 - Values: `stable`, `active_grow`, `active_grow_sticky`
+
+`show_termy_in_titlebar`
+- Default: `true`
+- Values: `true`/`false`
 
 `window_width`
 - Default: `1280`

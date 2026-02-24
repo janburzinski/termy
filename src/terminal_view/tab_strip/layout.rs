@@ -30,6 +30,7 @@ pub(crate) struct TabStripLayoutSnapshot {
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(crate) struct TabStripLayoutInput {
     pub(crate) viewport_width: f32,
+    pub(crate) left_inset_width: f32,
 }
 
 impl TabStripGeometry {
@@ -87,7 +88,7 @@ impl TerminalView {
 
     pub(crate) fn tab_strip_layout_for_input(input: TabStripLayoutInput) -> TabStripLayoutSnapshot {
         let window_width = input.viewport_width.max(0.0);
-        let left_inset_width = Self::titlebar_left_padding_for_platform().min(window_width);
+        let left_inset_width = input.left_inset_width.max(0.0).min(window_width);
         let remaining_after_left = (window_width - left_inset_width).max(0.0);
         let right_inset_width = TOP_STRIP_SIDE_PADDING.min(remaining_after_left);
         let row_width = (remaining_after_left - right_inset_width).max(0.0);
@@ -153,7 +154,20 @@ impl TerminalView {
     }
 
     pub(crate) fn tab_strip_layout_for_viewport_width(viewport_width: f32) -> TabStripLayoutSnapshot {
-        Self::tab_strip_layout_for_input(TabStripLayoutInput { viewport_width })
+        Self::tab_strip_layout_for_viewport_with_left_inset(
+            viewport_width,
+            Self::titlebar_left_padding_for_platform(),
+        )
+    }
+
+    pub(crate) fn tab_strip_layout_for_viewport_with_left_inset(
+        viewport_width: f32,
+        left_inset_width: f32,
+    ) -> TabStripLayoutSnapshot {
+        Self::tab_strip_layout_for_input(TabStripLayoutInput {
+            viewport_width,
+            left_inset_width,
+        })
     }
 
     pub(crate) fn tab_strip_layout(&self, window: &Window) -> TabStripLayoutSnapshot {
@@ -180,6 +194,15 @@ impl TerminalView {
     #[cfg(test)]
     pub(crate) fn tab_strip_geometry_for_viewport_width(viewport_width: f32) -> TabStripGeometry {
         Self::tab_strip_layout_for_viewport_width(viewport_width).geometry
+    }
+
+    #[cfg(test)]
+    pub(crate) fn tab_strip_geometry_for_viewport_with_left_inset(
+        viewport_width: f32,
+        left_inset_width: f32,
+    ) -> TabStripGeometry {
+        Self::tab_strip_layout_for_viewport_with_left_inset(viewport_width, left_inset_width)
+            .geometry
     }
 
     pub(crate) fn tab_strip_geometry(&self, window: &Window) -> TabStripGeometry {
@@ -275,5 +298,17 @@ mod tests {
             geometry.tabs_viewport_width + geometry.gutter_width + geometry.action_rail_width,
             geometry.row_width,
         );
+    }
+
+    #[test]
+    fn custom_left_inset_keeps_lane_contract_intact() {
+        let snapshot = TerminalView::tab_strip_layout_for_viewport_with_left_inset(1280.0, 132.0);
+        let geometry = snapshot.geometry;
+        assert_float_eq(geometry.left_inset_width, 132.0);
+        assert_float_eq(geometry.left_inset_end_x(), geometry.row_start_x);
+        assert_float_eq(geometry.tabs_viewport_end_x(), geometry.gutter_start_x);
+        assert_float_eq(geometry.gutter_end_x(), geometry.action_rail_start_x);
+        assert_float_eq(geometry.action_rail_end_x(), geometry.row_end_x);
+        assert_float_eq(geometry.row_end_x + geometry.right_inset_width, geometry.window_width);
     }
 }

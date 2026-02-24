@@ -37,6 +37,8 @@ tab_title_shell_integration = true\n\
 tab_close_visibility = active_hover\n\
 # Tab width behavior: stable | active_grow | active_grow_sticky\n\
 tab_width_mode = active_grow_sticky\n\
+# Show/hide termy in the macOS titlebar (between traffic lights and tabs)\n\
+# show_termy_in_titlebar = true\n\
 # Optional: static fallback tab title\n\
 # tab_title_fallback = Terminal\n\
 # Advanced tab-title options are documented in docs/configuration.md:\n\
@@ -444,6 +446,7 @@ pub struct AppConfig {
     pub tab_title: TabTitleConfig,
     pub tab_close_visibility: TabCloseVisibility,
     pub tab_width_mode: TabWidthMode,
+    pub show_termy_in_titlebar: bool,
     pub shell: Option<String>,
     pub term: String,
     pub colorterm: Option<String>,
@@ -483,6 +486,7 @@ impl Default for AppConfig {
             tab_title: TabTitleConfig::default(),
             tab_close_visibility: TabCloseVisibility::default(),
             tab_width_mode: TabWidthMode::default(),
+            show_termy_in_titlebar: true,
             shell: None,
             term: DEFAULT_TERM.to_string(),
             colorterm: Some(DEFAULT_COLORTERM.to_string()),
@@ -624,6 +628,12 @@ impl AppConfig {
             if key.eq_ignore_ascii_case("tab_width_mode") {
                 if let Some(mode) = TabWidthMode::from_str(value) {
                     config.tab_width_mode = mode;
+                }
+            }
+
+            if key.eq_ignore_ascii_case("show_termy_in_titlebar") {
+                if let Some(show_termy_in_titlebar) = parse_bool(value) {
+                    config.show_termy_in_titlebar = show_termy_in_titlebar;
                 }
             }
 
@@ -1174,6 +1184,24 @@ mod tests {
         );
         assert_eq!(invalid.tab_close_visibility, TabCloseVisibility::ActiveHover);
         assert_eq!(invalid.tab_width_mode, TabWidthMode::ActiveGrowSticky);
+    }
+
+    #[test]
+    fn show_termy_in_titlebar_parses_and_defaults() {
+        let defaults = AppConfig::from_contents("");
+        assert!(defaults.show_termy_in_titlebar);
+
+        let disabled = AppConfig::from_contents("show_termy_in_titlebar = false\n");
+        assert!(!disabled.show_termy_in_titlebar);
+
+        let enabled_numeric = AppConfig::from_contents("show_termy_in_titlebar = 1\n");
+        assert!(enabled_numeric.show_termy_in_titlebar);
+
+        let disabled_numeric = AppConfig::from_contents("show_termy_in_titlebar = 0\n");
+        assert!(!disabled_numeric.show_termy_in_titlebar);
+
+        let invalid = AppConfig::from_contents("show_termy_in_titlebar = maybe\n");
+        assert!(invalid.show_termy_in_titlebar);
     }
 
     #[test]

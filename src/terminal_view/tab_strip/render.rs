@@ -47,29 +47,32 @@ struct TabItemRenderInput {
 }
 
 impl TerminalView {
-    fn measure_tab_title_width(
+    fn measure_text_width(
         &mut self,
         window: &Window,
         font_family: &SharedString,
         font_family_key: &str,
-        title: &str,
+        text: &str,
+        font_size_px: f32,
     ) -> f32 {
-        if title.is_empty() {
+        if text.is_empty() {
             return 0.0;
         }
 
-        let font_size_px = 12.0f32;
+        if !font_size_px.is_finite() || font_size_px <= 0.0 {
+            return 0.0;
+        }
         let font_size_bits = font_size_px.to_bits();
         if let Some(width) =
             self.tab_strip
                 .title_width_cache
-                .get(title, font_family_key, font_size_bits)
+                .get(text, font_family_key, font_size_bits)
         {
             return width;
         }
 
         let run = TextRun {
-            len: title.len(),
+            len: text.len(),
             font: Font {
                 family: font_family.clone(),
                 weight: FontWeight::NORMAL,
@@ -87,13 +90,23 @@ impl TerminalView {
         };
         let shaped = window
             .text_system()
-            .shape_line(title.to_string().into(), px(font_size_px), &[run], None);
-        let width: f32 = shaped.x_for_index(title.len()).into();
+            .shape_line(text.to_string().into(), px(font_size_px), &[run], None);
+        let width: f32 = shaped.x_for_index(text.len()).into();
         let width = width.max(0.0);
         self.tab_strip
             .title_width_cache
-            .insert(title, font_family_key, font_size_bits, width);
+            .insert(text, font_family_key, font_size_bits, width);
         width
+    }
+
+    fn measure_tab_title_width(
+        &mut self,
+        window: &Window,
+        font_family: &SharedString,
+        font_family_key: &str,
+        title: &str,
+    ) -> f32 {
+        self.measure_text_width(window, font_family, font_family_key, title, 12.0)
     }
 
     fn measure_tab_title_widths(
@@ -108,6 +121,30 @@ impl TerminalView {
             widths.push(self.measure_tab_title_width(window, font_family, font_family_key, &title));
         }
         widths
+    }
+
+    fn termy_branding_reserved_width(
+        &mut self,
+        window: &Window,
+        font_family: &SharedString,
+        font_family_key: &str,
+    ) -> f32 {
+        if !cfg!(target_os = "macos") || !self.show_termy_in_titlebar {
+            return 0.0;
+        }
+
+        let text_width = self.measure_text_width(
+            window,
+            font_family,
+            font_family_key,
+            TOP_STRIP_TERMY_BRANDING_TEXT,
+            TOP_STRIP_TERMY_BRANDING_FONT_SIZE,
+        );
+        if text_width <= f32::EPSILON {
+            return 0.0;
+        }
+
+        text_width + (TOP_STRIP_TERMY_BRANDING_SIDE_PADDING * 2.0)
     }
 
     fn resolve_tab_strip_palette(&self, colors: &TerminalColors, tabbar_bg: gpui::Rgba) -> TabStripPalette {
@@ -173,8 +210,14 @@ impl TerminalView {
         }
     }
 
-    fn build_tab_strip_render_state(&mut self, window: &Window) -> TabStripRenderState {
-        let layout = self.tab_strip_layout(window);
+    fn build_tab_strip_render_state(
+        &mut self,
+        window: &Window,
+        left_inset_width: f32,
+    ) -> TabStripRenderState {
+        let viewport_width: f32 = window.viewport_size().width.into();
+        let layout =
+            Self::tab_strip_layout_for_viewport_with_left_inset(viewport_width, left_inset_width);
         self.set_tab_strip_layout_snapshot(layout);
 
         let geometry = layout.geometry;
@@ -238,6 +281,58 @@ impl TerminalView {
                     .bg(tab_stroke_color),
             )
             .into_any_element()
+    }
+
+    fn render_left_inset_lane(
+        width: f32,
+        tab_baseline_y: f32,
+        tab_stroke_color: gpui::Rgba,
+        font_family: &SharedString,
+        termy_branding_slot_start_x: f32,
+        termy_branding_slot_width: f32,
+        termy_branding_text_color: gpui::Rgba,
+    ) -> AnyElement {
+        let lane = div()
+            .id("tabbar-left-inset")
+            .relative()
+            .flex_none()
+            .w(px(width))
+            .h_full()
+            .child(
+                div()
+                    .absolute()
+                    .left_0()
+                    .right_0()
+                    .top(px(tab_baseline_y))
+                    .h(px(TAB_STROKE_THICKNESS))
+                    .bg(tab_stroke_color),
+            );
+
+        if termy_branding_slot_width <= f32::EPSILON {
+            return lane.into_any_element();
+        }
+
+        lane.child(
+            div()
+                .id("tabbar-termy-branding")
+                .absolute()
+                .left(px(termy_branding_slot_start_x.max(0.0)))
+                .top_0()
+                .bottom_0()
+                .w(px(termy_branding_slot_width.max(0.0)))
+                .overflow_hidden()
+                .flex()
+                .items_center()
+                .justify_center()
+                .child(
+                    div()
+                        .font_family(font_family.clone())
+                        .text_size(px(TOP_STRIP_TERMY_BRANDING_FONT_SIZE))
+                        .text_color(termy_branding_text_color)
+                        .child(TOP_STRIP_TERMY_BRANDING_TEXT),
+                ),
+        )
+        .into_any_element()
     }
 
     fn render_gutter_lane(
@@ -676,8 +771,20 @@ impl TerminalView {
             self.measure_tab_title_widths(window, font_family, font_family_key.as_str());
         self.sync_tab_title_text_widths(&measured_title_widths);
 
-        let state = self.build_tab_strip_render_state(window);
+        let base_left_inset_width = Self::titlebar_left_padding_for_platform();
+        let termy_branding_reserved_width =
+            self.termy_branding_reserved_width(window, font_family, font_family_key.as_str());
+        let state = self.build_tab_strip_render_state(
+            window,
+            base_left_inset_width + termy_branding_reserved_width,
+        );
         let palette = self.resolve_tab_strip_palette(colors, tabbar_bg);
+        let termy_branding_slot_start_x = base_left_inset_width.min(state.geometry.left_inset_width);
+        let termy_branding_slot_width = (state.geometry.left_inset_width - termy_branding_slot_start_x)
+            .max(0.0)
+            .min(termy_branding_reserved_width.max(0.0));
+        let mut termy_branding_text_color = palette.inactive_tab_text;
+        termy_branding_text_color.a = termy_branding_text_color.a.max(0.82);
         let tabs_scroll_content = self.build_tabs_scroll_content(
             window,
             &state,
@@ -712,11 +819,14 @@ impl TerminalView {
             .h(px(TABBAR_HEIGHT))
             .flex()
             .children((state.geometry.left_inset_width > 0.0).then(|| {
-                Self::render_inset_lane(
-                    "tabbar-left-inset",
+                Self::render_left_inset_lane(
                     state.geometry.left_inset_width,
                     state.chrome_layout.baseline_y,
                     palette.tab_stroke_color,
+                    font_family,
+                    termy_branding_slot_start_x,
+                    termy_branding_slot_width,
+                    termy_branding_text_color,
                 )
             }))
             .child(

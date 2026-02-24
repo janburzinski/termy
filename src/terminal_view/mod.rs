@@ -480,6 +480,7 @@ pub struct TerminalView {
     tab_title: TabTitleConfig,
     tab_close_visibility: TabCloseVisibility,
     tab_width_mode: TabWidthMode,
+    show_termy_in_titlebar: bool,
     tab_shell_integration: TabTitleShellIntegration,
     configured_working_dir: Option<String>,
     terminal_runtime: TerminalRuntimeConfig,
@@ -962,6 +963,7 @@ impl TerminalView {
             tab_title,
             tab_close_visibility: config.tab_close_visibility,
             tab_width_mode: config.tab_width_mode,
+            show_termy_in_titlebar: config.show_termy_in_titlebar,
             tab_shell_integration,
             configured_working_dir,
             terminal_runtime,
@@ -1058,8 +1060,11 @@ impl TerminalView {
         self.tab_title = config.tab_title.clone();
         let tab_close_visibility_changed = self.tab_close_visibility != config.tab_close_visibility;
         let tab_width_mode_changed = self.tab_width_mode != config.tab_width_mode;
+        let show_termy_in_titlebar_changed =
+            self.show_termy_in_titlebar != config.show_termy_in_titlebar;
         self.tab_close_visibility = config.tab_close_visibility;
         self.tab_width_mode = config.tab_width_mode;
+        self.show_termy_in_titlebar = config.show_termy_in_titlebar;
         self.tab_shell_integration = TabTitleShellIntegration {
             enabled: self.tab_title.shell_integration,
             explicit_prefix: self.tab_title.explicit_prefix.clone(),
@@ -1094,7 +1099,7 @@ impl TerminalView {
         for index in 0..self.tabs.len() {
             self.refresh_tab_title(index);
         }
-        if tab_close_visibility_changed || tab_width_mode_changed {
+        if tab_close_visibility_changed || tab_width_mode_changed || show_termy_in_titlebar_changed {
             self.mark_tab_strip_layout_dirty();
         }
 
