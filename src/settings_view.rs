@@ -584,9 +584,9 @@ impl SettingsWindow {
             let this = cx.entity().downgrade();
             let scroll_handle = self.content_scroll_handle.clone();
             let start_offset = scroll_handle.offset();
-            anchor.scroll_to(window, cx);
 
-            window.on_next_frame(move |_window, cx| {
+            window.on_next_frame(move |window, cx| {
+                anchor.scroll_to(window, cx);
                 let target_offset = scroll_handle.offset();
                 scroll_handle.set_offset(start_offset);
                 let _ = this.update(cx, |view, cx| {
