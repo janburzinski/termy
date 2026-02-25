@@ -49,3 +49,12 @@ build-setup *args:
       echo "PowerShell not found. Install PowerShell or run scripts/build-setup.ps1 directly from PowerShell."; \
       exit 127; \
     fi
+
+generate-keybindings-doc:
+    cargo run -p xtask -- generate-keybindings-doc
+
+check-keybindings-doc:
+    cargo run -p xtask -- generate-keybindings-doc --check
+
+check-boundaries:
+    ./scripts/check-boundaries.sh

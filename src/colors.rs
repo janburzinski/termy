@@ -2,6 +2,7 @@ use crate::config::{CustomColors, SHELL_DECIDE_THEME_ID};
 use alacritty_terminal::vte::ansi::{Color as AnsiColor, NamedColor, Rgb as AnsiRgb};
 use gpui::Rgba;
 use termy_themes as themes;
+use termy_themes::Rgb8;
 
 #[derive(Clone)]
 pub struct TerminalColors {
@@ -53,10 +54,10 @@ impl TerminalColors {
 
     fn from_theme_colors(theme: themes::ThemeColors) -> Self {
         Self {
-            ansi: theme.ansi,
-            foreground: theme.foreground,
-            background: theme.background,
-            cursor: theme.cursor,
+            ansi: theme.ansi.map(rgba_from_theme_rgb),
+            foreground: rgba_from_theme_rgb(theme.foreground),
+            background: rgba_from_theme_rgb(theme.background),
+            cursor: rgba_from_theme_rgb(theme.cursor),
         }
     }
 
@@ -141,4 +142,8 @@ fn rgba(r: u8, g: u8, b: u8) -> Rgba {
         b: b as f32 / 255.0,
         a: 1.0,
     }
+}
+
+fn rgba_from_theme_rgb(color: Rgb8) -> Rgba {
+    rgba(color.r, color.g, color.b)
 }

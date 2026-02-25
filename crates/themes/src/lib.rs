@@ -12,33 +12,11 @@ mod termy;
 mod tokyo_night;
 mod tomorrow_night;
 
-use gpui::Rgba;
 use std::collections::HashSet;
 use std::sync::{OnceLock, RwLock};
-
-pub const BUILTIN_THEME_IDS: &[&str] = &[
-    "termy",
-    "tokyo-night",
-    "catppuccin-mocha",
-    "dracula",
-    "gruvbox-dark",
-    "nord",
-    "solarized-dark",
-    "one-dark",
-    "monokai",
-    "material-dark",
-    "palenight",
-    "tomorrow-night",
-    "oceanic-next",
-];
-
-#[derive(Clone, Copy, Debug)]
-pub struct ThemeColors {
-    pub ansi: [Rgba; 16],
-    pub foreground: Rgba,
-    pub background: Rgba,
-    pub cursor: Rgba,
-}
+pub use termy_theme_core::{
+    BUILTIN_THEME_IDS, Rgb8, ThemeColors, canonical_builtin_theme_id, normalize_theme_id,
+};
 
 pub trait ThemeProvider: Send + Sync {
     fn theme(&self, theme_id: &str) -> Option<ThemeColors>;
@@ -155,60 +133,6 @@ pub fn builtin_theme(theme_id: &str) -> Option<ThemeColors> {
     }
 }
 
-pub fn canonical_builtin_theme_id(theme_id: &str) -> Option<&'static str> {
-    let normalized = normalize_theme_lookup(theme_id);
-    match normalized.as_str() {
-        "termy" | "default" => Some("termy"),
-        "tokyonight" => Some("tokyo-night"),
-        "catppuccin" | "catppuccinmocha" => Some("catppuccin-mocha"),
-        "dracula" => Some("dracula"),
-        "gruvbox" | "gruvboxdark" => Some("gruvbox-dark"),
-        "nord" => Some("nord"),
-        "solarized" | "solarizeddark" => Some("solarized-dark"),
-        "one" | "onedark" => Some("one-dark"),
-        "monokai" => Some("monokai"),
-        "material" | "materialdark" => Some("material-dark"),
-        "palenight" => Some("palenight"),
-        "tomorrow" | "tomorrownight" => Some("tomorrow-night"),
-        "oceanic" | "oceanicnext" => Some("oceanic-next"),
-        _ => None,
-    }
-}
-
-pub fn normalize_theme_id(theme_id: &str) -> String {
-    let mut normalized = String::new();
-    let mut last_dash = false;
-
-    for ch in theme_id.trim().chars() {
-        let ch = ch.to_ascii_lowercase();
-        match ch {
-            'a'..='z' | '0'..='9' => {
-                normalized.push(ch);
-                last_dash = false;
-            }
-            '-' | '_' | ' ' => {
-                if !normalized.is_empty() && !last_dash {
-                    normalized.push('-');
-                    last_dash = true;
-                }
-            }
-            _ => {}
-        }
-    }
-
-    while normalized.ends_with('-') {
-        normalized.pop();
-    }
-
-    normalized
-}
-
-fn normalize_theme_lookup(theme_id: &str) -> String {
-    let mut normalized = normalize_theme_id(theme_id);
-    normalized.retain(|c| c != '-');
-    normalized
-}
-
 pub fn tokyo_night() -> ThemeColors {
     tokyo_night::theme()
 }
@@ -261,11 +185,6 @@ pub fn oceanic_next() -> ThemeColors {
     oceanic_next::theme()
 }
 
-fn rgba(r: u8, g: u8, b: u8) -> Rgba {
-    Rgba {
-        r: r as f32 / 255.0,
-        g: g as f32 / 255.0,
-        b: b as f32 / 255.0,
-        a: 1.0,
-    }
+fn rgba(r: u8, g: u8, b: u8) -> Rgb8 {
+    Rgb8::new(r, g, b)
 }

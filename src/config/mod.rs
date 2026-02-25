@@ -14,9 +14,8 @@ pub use io::{ensure_config_file, open_config_file, subscribe_config_changes};
 pub use mutate::{import_colors_from_json, set_config_value, set_theme_in_config};
 pub use termy_config_core::{
     AppConfig, ConfigDiagnostic, ConfigDiagnosticKind, CursorStyle, CustomColors,
-    KeybindConfigLine, SHELL_DECIDE_THEME_ID, TabCloseVisibility, TabTitleConfig, TabTitleMode,
-    TabTitleSource, TabWidthMode, TerminalScrollbarStyle, TerminalScrollbarVisibility,
-    WorkingDirFallback,
+    SHELL_DECIDE_THEME_ID, TabCloseVisibility, TabTitleConfig, TabTitleMode, TabTitleSource,
+    TabWidthMode, TerminalScrollbarStyle, TerminalScrollbarVisibility, WorkingDirFallback,
 };
 
 pub struct LoadedConfig {
@@ -33,7 +32,7 @@ pub struct RuntimeConfigLoad {
     pub loaded_from_disk: bool,
 }
 
-pub(crate) const DEFAULT_CONFIG: &str = include_str!("default_config.txt");
+pub(crate) const DEFAULT_CONFIG: &str = termy_config_core::DEFAULT_CONFIG_TEMPLATE;
 
 fn load_from_path(path: PathBuf) -> Result<LoadedConfig, ConfigIoError> {
     let contents = fs::read_to_string(&path).map_err(|source| ConfigIoError::ReadConfig {

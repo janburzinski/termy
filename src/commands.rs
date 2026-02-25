@@ -1,4 +1,5 @@
 use gpui::{FocusHandle, KeyBinding, Window, actions};
+use termy_command_core::CommandId;
 
 const GLOBAL_CONTEXT: Option<&str> = None;
 const TERMINAL_CONTEXT: Option<&str> = Some("Terminal");
@@ -11,7 +12,7 @@ pub enum CommandPaletteVisibility {
 }
 
 impl CommandPaletteVisibility {
-    fn is_visible(self) -> bool {
+    pub fn is_visible(self) -> bool {
         match self {
             Self::Always => true,
             Self::MacOsOnly => cfg!(target_os = "macos"),
@@ -36,7 +37,6 @@ pub struct CommandPaletteEntry {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct CommandSpec {
     pub action: CommandAction,
-    pub config_name: &'static str,
     pub context: Option<&'static str>,
     pub palette: Option<CommandPaletteSpec>,
 }
@@ -55,20 +55,18 @@ const fn palette(
 
 const fn command(
     action: CommandAction,
-    config_name: &'static str,
     context: Option<&'static str>,
     palette: Option<CommandPaletteSpec>,
 ) -> CommandSpec {
     CommandSpec {
         action,
-        config_name,
         context,
         palette,
     }
 }
 
 macro_rules! define_commands {
-    ($(($variant:ident, $config_name:literal, $context:expr, $palette:expr)),+ $(,)?) => {
+    ($(($variant:ident, $context:expr, $palette:expr)),+ $(,)?) => {
         actions!(
             termy,
             [$( $variant, )+]
@@ -80,7 +78,7 @@ macro_rules! define_commands {
         }
 
         const COMMAND_SPECS: &[CommandSpec] = &[
-            $(command(CommandAction::$variant, $config_name, $context, $palette),)+
+            $(command(CommandAction::$variant, $context, $palette),)+
         ];
 
         impl CommandAction {
@@ -94,15 +92,14 @@ macro_rules! define_commands {
                 COMMAND_SPECS.iter().map(|spec| spec.action)
             }
 
+            #[allow(dead_code)]
             pub fn from_config_name(name: &str) -> Option<Self> {
-                let normalized = name.trim().to_ascii_lowercase().replace('-', "_");
-                COMMAND_SPECS
-                    .iter()
-                    .find_map(|spec| (spec.config_name == normalized).then_some(spec.action))
+                CommandId::from_config_name(name).map(Self::from_command_id)
             }
 
+            #[allow(dead_code)]
             pub fn all_config_names() -> impl std::iter::ExactSizeIterator<Item = &'static str> {
-                COMMAND_SPECS.iter().map(|spec| spec.config_name)
+                CommandId::all_config_names()
             }
 
             pub fn palette_entries() -> Vec<CommandPaletteEntry> {
@@ -151,10 +148,28 @@ macro_rules! define_commands {
     };
 }
 
+macro_rules! impl_command_action_id_mapping {
+    ($(($variant:ident, $_config_name:literal),)+) => {
+        impl CommandAction {
+            pub fn from_command_id(id: CommandId) -> Self {
+                match id {
+                    $(CommandId::$variant => Self::$variant,)+
+                }
+            }
+
+            #[allow(dead_code)]
+            pub fn to_command_id(self) -> CommandId {
+                match self {
+                    $(Self::$variant => CommandId::$variant,)+
+                }
+            }
+        }
+    };
+}
+
 define_commands!(
     (
         NewTab,
-        "new_tab",
         TERMINAL_CONTEXT,
         Some(palette(
             "New Tab",
@@ -164,7 +179,6 @@ define_commands!(
     ),
     (
         CloseTab,
-        "close_tab",
         TERMINAL_CONTEXT,
         Some(palette(
             "Close Tab",
@@ -172,10 +186,9 @@ define_commands!(
             CommandPaletteVisibility::Always
         ))
     ),
-    (MinimizeWindow, "minimize_window", TERMINAL_CONTEXT, None),
+    (MinimizeWindow, TERMINAL_CONTEXT, None),
     (
         RenameTab,
-        "rename_tab",
         TERMINAL_CONTEXT,
         Some(palette(
             "Rename Tab",
@@ -185,7 +198,6 @@ define_commands!(
     ),
     (
         AppInfo,
-        "app_info",
         TERMINAL_CONTEXT,
         Some(palette(
             "App Info",
@@ -195,7 +207,6 @@ define_commands!(
     ),
     (
         NativeSdkExample,
-        "native_sdk_example",
         TERMINAL_CONTEXT,
         Some(palette(
             "Native SDK Example",
@@ -205,7 +216,6 @@ define_commands!(
     ),
     (
         RestartApp,
-        "restart_app",
         TERMINAL_CONTEXT,
         Some(palette(
             "Restart App",
@@ -215,7 +225,6 @@ define_commands!(
     ),
     (
         OpenConfig,
-        "open_config",
         GLOBAL_CONTEXT,
         Some(palette(
             "Open Settings File",
@@ -225,7 +234,6 @@ define_commands!(
     ),
     (
         OpenSettings,
-        "open_settings",
         GLOBAL_CONTEXT,
         Some(palette(
             "Settings",
@@ -235,7 +243,6 @@ define_commands!(
     ),
     (
         ImportColors,
-        "import_colors",
         TERMINAL_CONTEXT,
         Some(palette(
             "Import Colors",
@@ -245,7 +252,6 @@ define_commands!(
     ),
     (
         SwitchTheme,
-        "switch_theme",
         TERMINAL_CONTEXT,
         Some(palette(
             "Switch Theme",
@@ -255,7 +261,6 @@ define_commands!(
     ),
     (
         ZoomIn,
-        "zoom_in",
         TERMINAL_CONTEXT,
         Some(palette(
             "Zoom In",
@@ -265,7 +270,6 @@ define_commands!(
     ),
     (
         ZoomOut,
-        "zoom_out",
         TERMINAL_CONTEXT,
         Some(palette(
             "Zoom Out",
@@ -275,7 +279,6 @@ define_commands!(
     ),
     (
         ZoomReset,
-        "zoom_reset",
         TERMINAL_CONTEXT,
         Some(palette(
             "Reset Zoom",
@@ -285,7 +288,6 @@ define_commands!(
     ),
     (
         OpenSearch,
-        "open_search",
         TERMINAL_CONTEXT,
         Some(palette(
             "Find",
@@ -295,7 +297,6 @@ define_commands!(
     ),
     (
         CheckForUpdates,
-        "check_for_updates",
         TERMINAL_CONTEXT,
         Some(palette(
             "Check for Updates",
@@ -305,7 +306,6 @@ define_commands!(
     ),
     (
         Quit,
-        "quit",
         GLOBAL_CONTEXT,
         Some(palette(
             "Quit Termy",
@@ -313,32 +313,16 @@ define_commands!(
             CommandPaletteVisibility::Always
         ))
     ),
-    (
-        ToggleCommandPalette,
-        "toggle_command_palette",
-        TERMINAL_CONTEXT,
-        None
-    ),
-    (Copy, "copy", TERMINAL_CONTEXT, None),
-    (Paste, "paste", TERMINAL_CONTEXT, None),
-    (CloseSearch, "close_search", TERMINAL_CONTEXT, None),
-    (SearchNext, "search_next", TERMINAL_CONTEXT, None),
-    (SearchPrevious, "search_previous", TERMINAL_CONTEXT, None),
-    (
-        ToggleSearchCaseSensitive,
-        "toggle_search_case_sensitive",
-        TERMINAL_CONTEXT,
-        None
-    ),
-    (
-        ToggleSearchRegex,
-        "toggle_search_regex",
-        TERMINAL_CONTEXT,
-        None
-    ),
+    (ToggleCommandPalette, TERMINAL_CONTEXT, None),
+    (Copy, TERMINAL_CONTEXT, None),
+    (Paste, TERMINAL_CONTEXT, None),
+    (CloseSearch, TERMINAL_CONTEXT, None),
+    (SearchNext, TERMINAL_CONTEXT, None),
+    (SearchPrevious, TERMINAL_CONTEXT, None),
+    (ToggleSearchCaseSensitive, TERMINAL_CONTEXT, None),
+    (ToggleSearchRegex, TERMINAL_CONTEXT, None),
     (
         InstallCli,
-        "install_cli",
         TERMINAL_CONTEXT,
         Some(palette(
             "Install CLI",
@@ -347,6 +331,8 @@ define_commands!(
         ))
     ),
 );
+
+termy_command_core::termy_command_catalog!(impl_command_action_id_mapping);
 
 actions!(
     termy_inline_input,
@@ -400,6 +386,7 @@ pub fn inline_input_keybindings() -> Vec<KeyBinding> {
 mod tests {
     use super::CommandAction;
     use std::collections::HashSet;
+    use termy_command_core::CommandId;
 
     #[test]
     fn command_catalog_contains_unique_actions() {
@@ -442,5 +429,18 @@ mod tests {
                 .iter()
                 .any(|entry| entry.action == CommandAction::RenameTab)
         );
+    }
+
+    #[test]
+    fn command_action_roundtrips_all_core_command_ids() {
+        for command_id in CommandId::all() {
+            let action = CommandAction::from_command_id(command_id);
+            assert_eq!(action.to_command_id(), command_id);
+        }
+    }
+
+    #[test]
+    fn command_action_count_matches_core_catalog() {
+        assert_eq!(CommandAction::all().count(), CommandId::all().count());
     }
 }

@@ -6,6 +6,7 @@ pub mod list_fonts;
 pub mod list_keybinds;
 pub mod list_themes;
 pub mod prettify_config;
+pub mod providers;
 pub mod show_config;
 pub mod tui;
 pub mod update;

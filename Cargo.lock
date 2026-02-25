@@ -5516,6 +5516,7 @@ dependencies = [
  "tempfile",
  "termy_auto_update",
  "termy_auto_update_ui",
+ "termy_command_core",
  "termy_config_core",
  "termy_native_sdk",
  "termy_search",
@@ -5533,9 +5534,7 @@ dependencies = [
  "flume",
  "gpui",
  "log",
- "semver",
- "serde",
- "serde_json",
+ "termy_release_core",
  "ureq",
 ]
 
@@ -5557,17 +5556,22 @@ dependencies = [
  "crossterm",
  "dirs 6.0.0",
  "ratatui",
- "semver",
- "serde",
+ "termy_command_core",
  "termy_config_core",
- "ureq",
+ "termy_release_core",
+ "termy_theme_core",
+ "termy_themes",
 ]
+
+[[package]]
+name = "termy_command_core"
+version = "0.1.0"
 
 [[package]]
 name = "termy_config_core"
 version = "0.1.0"
 dependencies = [
- "termy_themes",
+ "termy_theme_core",
 ]
 
 [[package]]
@@ -5579,6 +5583,16 @@ dependencies = [
  "objc2-app-kit",
  "objc2-foundation",
  "windows 0.61.3",
+]
+
+[[package]]
+name = "termy_release_core"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "semver",
+ "serde",
+ "ureq",
 ]
 
 [[package]]
@@ -5600,10 +5614,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "termy_theme_core"
+version = "0.1.0"
+
+[[package]]
 name = "termy_themes"
 version = "0.1.0"
 dependencies = [
- "gpui",
+ "termy_theme_core",
 ]
 
 [[package]]
@@ -7149,6 +7167,14 @@ name = "xmlwriter"
 version = "0.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ec7a2a501ed189703dba8b08142f057e887dfc4b2cc4db2d343ac6376ba3e0b9"
+
+[[package]]
+name = "xtask"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "termy_command_core",
+]
 
 [[package]]
 name = "y4m"

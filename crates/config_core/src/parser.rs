@@ -516,11 +516,11 @@ pub fn parse_theme_id(value: &str) -> Option<ThemeId> {
         return None;
     }
 
-    if let Some(canonical) = termy_themes::canonical_builtin_theme_id(value) {
+    if let Some(canonical) = termy_theme_core::canonical_builtin_theme_id(value) {
         return Some(canonical.to_string());
     }
 
-    let normalized = termy_themes::normalize_theme_id(value);
+    let normalized = termy_theme_core::normalize_theme_id(value);
     if matches!(
         normalized.as_str(),
         "shell" | "shell-decide" | "let-shell-decide"

@@ -1,10 +1,8 @@
-mod github;
-
-pub use github::{ReleaseInfo, fetch_latest_release};
-
 use anyhow::{Context, Result};
 use gpui::{App, AsyncApp, WeakEntity};
 use std::path::PathBuf;
+pub use termy_release_core::ReleaseInfo;
+use termy_release_core::{UpdateCheck, check_for_updates};
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum UpdateState {
@@ -57,7 +55,7 @@ impl AutoUpdater {
         let current_version = this.read(cx).current_version.to_string();
         let bg = cx
             .background_executor()
-            .spawn(async move { fetch_latest_release() });
+            .spawn(async move { check_for_updates(&current_version) });
 
         let weak = entity.clone();
         cx.spawn(async move |cx: &mut AsyncApp| {
@@ -66,21 +64,15 @@ impl AutoUpdater {
                 let Some(this) = weak.upgrade() else { return };
                 this.update(cx, |this, cx| {
                     match result {
-                        Ok(info) => {
-                            let current = semver::Version::parse(&current_version).ok();
-                            let latest = semver::Version::parse(&info.version).ok();
-                            match (current, latest) {
-                                (Some(c), Some(l)) if l > c => {
-                                    this.state = UpdateState::Available {
-                                        version: info.version,
-                                        url: info.download_url,
-                                        extension: info.extension,
-                                    };
-                                }
-                                _ => {
-                                    this.state = UpdateState::UpToDate;
-                                }
-                            }
+                        Ok(UpdateCheck::UpdateAvailable(info)) => {
+                            this.state = UpdateState::Available {
+                                version: info.version,
+                                url: info.download_url,
+                                extension: info.extension,
+                            };
+                        }
+                        Ok(UpdateCheck::UpToDate) => {
+                            this.state = UpdateState::UpToDate;
                         }
                         Err(e) => {
                             log::warn!("Update check failed: {}", e);

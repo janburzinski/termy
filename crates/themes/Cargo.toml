@@ -4,4 +4,4 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-gpui = { git = "https://github.com/zed-industries/zed", package = "gpui" }
+termy_theme_core = { path = "../theme_core" }
