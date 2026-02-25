@@ -68,6 +68,197 @@ fn colors_approximately_equal(a: &Hsla, b: &Hsla) -> bool {
         && (a.a - b.a).abs() < EPSILON
 }
 
+// NOTE: We intentionally render Unicode block elements (U+2580..U+259F) as
+// pixel-snapped quads instead of shaped font glyphs.
+//
+// Why:
+// - Glyph rasterization anti-aliases the hard edges of chars like '▀'.
+// - In transparent/layered terminal surfaces (GPUI terminals, e.g. Zed/opencode),
+//   those semi-transparent edge pixels can show up as faint seams/lines.
+// - Drawing exact geometry with snapped bounds gives deterministic, hard edges
+//   and eliminates the artifact.
+const BLOCK_ELEMENTS_START: u32 = 0x2580;
+const BLOCK_ELEMENTS_END: u32 = 0x259F;
+const QUAD_UPPER_LEFT: u8 = 0b0001;
+const QUAD_UPPER_RIGHT: u8 = 0b0010;
+const QUAD_LOWER_LEFT: u8 = 0b0100;
+const QUAD_LOWER_RIGHT: u8 = 0b1000;
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct BlockRectSpec {
+    left: f32,
+    top: f32,
+    right: f32,
+    bottom: f32,
+    alpha: f32,
+}
+
+impl BlockRectSpec {
+    const fn new(left: f32, top: f32, right: f32, bottom: f32, alpha: f32) -> Self {
+        Self {
+            left,
+            top,
+            right,
+            bottom,
+            alpha,
+        }
+    }
+}
+
+const EMPTY_BLOCK_RECT: BlockRectSpec = BlockRectSpec::new(0.0, 0.0, 0.0, 0.0, 0.0);
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct BlockElementGeometry {
+    rects: [BlockRectSpec; 4],
+    rect_count: usize,
+}
+
+impl BlockElementGeometry {
+    const fn one(rect: BlockRectSpec) -> Self {
+        Self {
+            rects: [rect, EMPTY_BLOCK_RECT, EMPTY_BLOCK_RECT, EMPTY_BLOCK_RECT],
+            rect_count: 1,
+        }
+    }
+
+    fn rects(&self) -> &[BlockRectSpec] {
+        &self.rects[..self.rect_count]
+    }
+}
+
+fn full_cell_rect(alpha: f32) -> BlockRectSpec {
+    BlockRectSpec::new(0.0, 0.0, 1.0, 1.0, alpha)
+}
+
+fn vertical_fill_from_bottom(fraction: f32) -> BlockElementGeometry {
+    BlockElementGeometry::one(BlockRectSpec::new(0.0, 1.0 - fraction, 1.0, 1.0, 1.0))
+}
+
+fn horizontal_fill_from_left(fraction: f32) -> BlockElementGeometry {
+    BlockElementGeometry::one(BlockRectSpec::new(0.0, 0.0, fraction, 1.0, 1.0))
+}
+
+fn quadrants(mask: u8) -> BlockElementGeometry {
+    let mut rects = [EMPTY_BLOCK_RECT; 4];
+    let mut count = 0;
+
+    if mask & QUAD_UPPER_LEFT != 0 {
+        rects[count] = BlockRectSpec::new(0.0, 0.0, 0.5, 0.5, 1.0);
+        count += 1;
+    }
+    if mask & QUAD_UPPER_RIGHT != 0 {
+        rects[count] = BlockRectSpec::new(0.5, 0.0, 1.0, 0.5, 1.0);
+        count += 1;
+    }
+    if mask & QUAD_LOWER_LEFT != 0 {
+        rects[count] = BlockRectSpec::new(0.0, 0.5, 0.5, 1.0, 1.0);
+        count += 1;
+    }
+    if mask & QUAD_LOWER_RIGHT != 0 {
+        rects[count] = BlockRectSpec::new(0.5, 0.5, 1.0, 1.0, 1.0);
+        count += 1;
+    }
+
+    BlockElementGeometry {
+        rects,
+        rect_count: count,
+    }
+}
+
+fn block_element_geometry(c: char) -> Option<BlockElementGeometry> {
+    let codepoint = c as u32;
+    if !(BLOCK_ELEMENTS_START..=BLOCK_ELEMENTS_END).contains(&codepoint) {
+        return None;
+    }
+
+    Some(match c {
+        '\u{2580}' => BlockElementGeometry::one(BlockRectSpec::new(0.0, 0.0, 1.0, 0.5, 1.0)),
+        '\u{2581}' => vertical_fill_from_bottom(1.0 / 8.0),
+        '\u{2582}' => vertical_fill_from_bottom(2.0 / 8.0),
+        '\u{2583}' => vertical_fill_from_bottom(3.0 / 8.0),
+        '\u{2584}' => vertical_fill_from_bottom(4.0 / 8.0),
+        '\u{2585}' => vertical_fill_from_bottom(5.0 / 8.0),
+        '\u{2586}' => vertical_fill_from_bottom(6.0 / 8.0),
+        '\u{2587}' => vertical_fill_from_bottom(7.0 / 8.0),
+        '\u{2588}' => BlockElementGeometry::one(full_cell_rect(1.0)),
+        '\u{2589}' => horizontal_fill_from_left(7.0 / 8.0),
+        '\u{258A}' => horizontal_fill_from_left(6.0 / 8.0),
+        '\u{258B}' => horizontal_fill_from_left(5.0 / 8.0),
+        '\u{258C}' => horizontal_fill_from_left(4.0 / 8.0),
+        '\u{258D}' => horizontal_fill_from_left(3.0 / 8.0),
+        '\u{258E}' => horizontal_fill_from_left(2.0 / 8.0),
+        '\u{258F}' => horizontal_fill_from_left(1.0 / 8.0),
+        '\u{2590}' => BlockElementGeometry::one(BlockRectSpec::new(0.5, 0.0, 1.0, 1.0, 1.0)),
+        '\u{2591}' => BlockElementGeometry::one(full_cell_rect(0.25)),
+        '\u{2592}' => BlockElementGeometry::one(full_cell_rect(0.50)),
+        '\u{2593}' => BlockElementGeometry::one(full_cell_rect(0.75)),
+        '\u{2594}' => BlockElementGeometry::one(BlockRectSpec::new(0.0, 0.0, 1.0, 1.0 / 8.0, 1.0)),
+        '\u{2595}' => BlockElementGeometry::one(BlockRectSpec::new(7.0 / 8.0, 0.0, 1.0, 1.0, 1.0)),
+        '\u{2596}' => quadrants(QUAD_LOWER_LEFT),
+        '\u{2597}' => quadrants(QUAD_LOWER_RIGHT),
+        '\u{2598}' => quadrants(QUAD_UPPER_LEFT),
+        '\u{2599}' => quadrants(QUAD_UPPER_LEFT | QUAD_LOWER_LEFT | QUAD_LOWER_RIGHT),
+        '\u{259A}' => quadrants(QUAD_UPPER_LEFT | QUAD_LOWER_RIGHT),
+        '\u{259B}' => quadrants(QUAD_UPPER_LEFT | QUAD_UPPER_RIGHT | QUAD_LOWER_LEFT),
+        '\u{259C}' => quadrants(QUAD_UPPER_LEFT | QUAD_UPPER_RIGHT | QUAD_LOWER_RIGHT),
+        '\u{259D}' => quadrants(QUAD_UPPER_RIGHT),
+        '\u{259E}' => quadrants(QUAD_UPPER_RIGHT | QUAD_LOWER_LEFT),
+        '\u{259F}' => quadrants(QUAD_UPPER_RIGHT | QUAD_LOWER_LEFT | QUAD_LOWER_RIGHT),
+        _ => return None,
+    })
+}
+
+fn snapped_block_rect_bounds(
+    cell_bounds: Bounds<Pixels>,
+    rect: BlockRectSpec,
+) -> Option<Bounds<Pixels>> {
+    let origin_x: f32 = cell_bounds.origin.x.into();
+    let origin_y: f32 = cell_bounds.origin.y.into();
+    let cell_width: f32 = cell_bounds.size.width.into();
+    let cell_height: f32 = cell_bounds.size.height.into();
+
+    let left = (origin_x + cell_width * rect.left).round();
+    let right = (origin_x + cell_width * rect.right).round();
+    let top = (origin_y + cell_height * rect.top).round();
+    let bottom = (origin_y + cell_height * rect.bottom).round();
+
+    let width = right - left;
+    let height = bottom - top;
+    if width <= 0.0 || height <= 0.0 {
+        return None;
+    }
+
+    Some(Bounds {
+        origin: point(px(left), px(top)),
+        size: Size {
+            width: px(width),
+            height: px(height),
+        },
+    })
+}
+
+fn paint_block_element_quad(
+    window: &mut Window,
+    cell_bounds: Bounds<Pixels>,
+    geometry: BlockElementGeometry,
+    color: Hsla,
+) {
+    for rect in geometry.rects() {
+        if let Some(bounds) = snapped_block_rect_bounds(cell_bounds, *rect) {
+            let mut fill = color;
+            fill.a *= rect.alpha;
+            window.paint_quad(quad(
+                bounds,
+                px(0.0),
+                fill,
+                gpui::Edges::default(),
+                Hsla::transparent_black(),
+                gpui::BorderStyle::default(),
+            ));
+        }
+    }
+}
+
 impl Element for TerminalGrid {
     type RequestLayoutState = ();
     type PrepaintState = ();
@@ -267,6 +458,15 @@ impl Element for TerminalGrid {
                 cell.fg
             };
 
+            if let Some(geometry) = block_element_geometry(cell.char) {
+                let cell_bounds = Bounds {
+                    origin: point(x, y),
+                    size: self.cell_size,
+                };
+                paint_block_element_quad(window, cell_bounds, geometry, fg_color);
+                continue;
+            }
+
             let text: SharedString = cell.char.to_string().into();
             let font = if cell.bold { &font_bold } else { &font_normal };
 
@@ -303,5 +503,64 @@ impl Element for TerminalGrid {
                 cx,
             );
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use gpui::{point, px, Bounds, Size};
+
+    #[test]
+    fn block_element_geometry_is_complete_for_unicode_range() {
+        for codepoint in BLOCK_ELEMENTS_START..=BLOCK_ELEMENTS_END {
+            let glyph = char::from_u32(codepoint).expect("valid block-element codepoint");
+            assert!(
+                block_element_geometry(glyph).is_some(),
+                "missing geometry for U+{codepoint:04X}"
+            );
+        }
+    }
+
+    #[test]
+    fn upper_half_block_geometry_covers_top_half() {
+        let geometry = block_element_geometry('\u{2580}').expect("expected block geometry");
+        assert_eq!(geometry.rect_count, 1);
+        let rect = geometry.rects()[0];
+        assert_eq!(rect.left, 0.0);
+        assert_eq!(rect.top, 0.0);
+        assert_eq!(rect.right, 1.0);
+        assert_eq!(rect.bottom, 0.5);
+        assert_eq!(rect.alpha, 1.0);
+    }
+
+    #[test]
+    fn upper_half_block_bounds_are_pixel_snapped() {
+        let geometry = block_element_geometry('\u{2580}').expect("expected block geometry");
+        let rect = geometry.rects()[0];
+        let cell_bounds = Bounds {
+            origin: point(px(12.3), px(40.7)),
+            size: Size {
+                width: px(17.8),
+                height: px(15.2),
+            },
+        };
+
+        let snapped = snapped_block_rect_bounds(cell_bounds, rect).expect("expected bounds");
+
+        let x: f32 = snapped.origin.x.into();
+        let y: f32 = snapped.origin.y.into();
+        let width: f32 = snapped.size.width.into();
+        let height: f32 = snapped.size.height.into();
+        assert_eq!(x.fract(), 0.0);
+        assert_eq!(y.fract(), 0.0);
+        assert_eq!(width.fract(), 0.0);
+        assert_eq!(height.fract(), 0.0);
+    }
+
+    #[test]
+    fn fast_path_excludes_non_block_glyphs() {
+        assert!(block_element_geometry('\u{2579}').is_none());
+        assert!(block_element_geometry('A').is_none());
     }
 }
