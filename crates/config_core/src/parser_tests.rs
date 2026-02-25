@@ -335,7 +335,10 @@ fn numeric_keys_parse_table_driven() {
     assert_eq!(parse("background_opacity = -0.5\n").background_opacity, 0.0);
     assert_eq!(parse("background_opacity = 4\n").background_opacity, 1.0);
     let nan_opacity = parse_report("background_opacity = NaN\n");
-    assert_eq!(nan_opacity.config.background_opacity, defaults.background_opacity);
+    assert_eq!(
+        nan_opacity.config.background_opacity,
+        defaults.background_opacity
+    );
     assert!(
         nan_opacity
             .diagnostics

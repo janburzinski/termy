@@ -614,13 +614,7 @@ fn parse_positive_f32_field(
     key: &str,
     value: &str,
 ) -> Option<f32> {
-    let parsed = parse_finite_f32_field(
-        diagnostics,
-        line_number,
-        key,
-        value,
-        "a positive number",
-    )?;
+    let parsed = parse_finite_f32_field(diagnostics, line_number, key, value, "a positive number")?;
     if parsed > 0.0 {
         Some(parsed)
     } else {

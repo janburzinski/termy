@@ -6,7 +6,7 @@ use std::{
     sync::{LazyLock, Mutex},
 };
 
-use fs4::FileExt;
+use fs4::fs_std::FileExt;
 use termy_config_core::{Rgb8, canonical_color_key, parse_theme_id};
 
 use super::ConfigIoError;
@@ -17,9 +17,10 @@ static CONFIG_UPDATE_LOCK: LazyLock<Mutex<()>> = LazyLock::new(|| Mutex::new(())
 fn update_config_contents<R>(
     updater: impl FnOnce(&str) -> Result<(String, R), String>,
 ) -> Result<R, String> {
-    let _process_guard = CONFIG_UPDATE_LOCK
-        .lock()
-        .map_err(|_| "Failed to acquire config update lock".to_string())?;
+    let _process_guard = CONFIG_UPDATE_LOCK.lock().unwrap_or_else(|poison| {
+        log::warn!("Config update lock was poisoned; recovering lock state");
+        poison.into_inner()
+    });
     let config_path = ensure_config_file().map_err(|error| error.to_string())?;
     let lock_path = config_path.with_extension("lock");
     let lock_path_display = lock_path.display().to_string();
@@ -289,8 +290,7 @@ mod tests {
         }
     }
 
-    fn with_temp_xdg_config_home(test: impl FnOnce(&Path)) {
-        let _guard = ENV_LOCK.lock().expect("env lock");
+    fn with_temp_xdg_config_home_inner(test: impl FnOnce(&Path)) {
         let temp_dir = tempfile::tempdir().expect("tempdir");
         let xdg_home = temp_dir.path().join("xdg");
         std::fs::create_dir_all(&xdg_home).expect("create xdg home");
@@ -299,11 +299,17 @@ mod tests {
         test(temp_dir.path());
     }
 
+    fn with_temp_xdg_config_home(test: impl FnOnce(&Path)) {
+        let _guard = ENV_LOCK.lock().expect("env lock");
+        with_temp_xdg_config_home_inner(test);
+    }
+
     #[test]
     fn with_temp_xdg_config_home_restores_environment_after_panic() {
+        let _guard = ENV_LOCK.lock().expect("env lock");
         let before = std::env::var_os("XDG_CONFIG_HOME");
         let result = std::panic::catch_unwind(|| {
-            with_temp_xdg_config_home(|_| panic!("intentional panic"));
+            with_temp_xdg_config_home_inner(|_| panic!("intentional panic"));
         });
         assert!(result.is_err());
         assert_eq!(std::env::var_os("XDG_CONFIG_HOME"), before);
