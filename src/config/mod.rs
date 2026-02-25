@@ -1,96 +1,222 @@
+mod error;
 mod io;
 mod mutate;
 
-use std::fs;
+use std::time::Duration;
+use std::{
+    fs,
+    hash::{DefaultHasher, Hash, Hasher},
+    path::{Path, PathBuf},
+};
 
+pub use error::ConfigIoError;
 pub use io::{ensure_config_file, open_config_file, subscribe_config_changes};
 pub use mutate::{import_colors_from_json, set_config_value, set_theme_in_config};
 pub use termy_config_core::{
-    AppConfig, CursorStyle, CustomColors, KeybindConfigLine, SHELL_DECIDE_THEME_ID,
-    TabCloseVisibility, TabTitleConfig, TabTitleMode, TabTitleSource, TabWidthMode,
-    TerminalScrollbarStyle, TerminalScrollbarVisibility, WorkingDirFallback,
+    AppConfig, ConfigDiagnostic, ConfigDiagnosticKind, CursorStyle, CustomColors,
+    KeybindConfigLine, SHELL_DECIDE_THEME_ID, TabCloseVisibility, TabTitleConfig, TabTitleMode,
+    TabTitleSource, TabWidthMode, TerminalScrollbarStyle, TerminalScrollbarVisibility,
+    WorkingDirFallback,
 };
 
-pub(crate) const DEFAULT_CONFIG: &str = "# Main settings\n\
-theme = termy\n\
-# TERM value for child shells and terminal apps\n\
-term = xterm-256color\n\
-# Startup directory for new terminal sessions (~ supported)\n\
-# working_dir = ~/Documents\n\
-# Warn before quitting when tabs are busy (running command/fullscreen TUI)\n\
-# warn_on_quit_with_running_process = true\n\
-# Tab title mode. Supported values: smart, shell, explicit, static\n\
-# smart = manual rename > explicit title > shell/app title > fallback\n\
-tab_title_mode = smart\n\
-# Export TERMY_* env vars for optional shell tab-title integration\n\
-tab_title_shell_integration = true\n\
-# Tab close button visibility: active_hover | hover | always\n\
-tab_close_visibility = active_hover\n\
-# Tab width behavior: stable | active_grow | active_grow_sticky\n\
-tab_width_mode = active_grow_sticky\n\
-# Show/hide termy in the macOS titlebar (between traffic lights and tabs)\n\
-# show_termy_in_titlebar = true\n\
-# Optional: static fallback tab title\n\
-# tab_title_fallback = Terminal\n\
-# Advanced tab-title options are documented in docs/configuration.md:\n\
-# tab_title_priority = manual, explicit, shell, fallback\n\
-# tab_title_explicit_prefix = termy:tab:\n\
-# tab_title_prompt_format = {cwd}\n\
-# tab_title_command_format = {command}\n\
-# Startup window size in pixels\n\
-window_width = 1280\n\
-window_height = 820\n\
-# Terminal font family\n\
-font_family = JetBrains Mono\n\
-# Terminal font size in pixels\n\
-font_size = 14\n\
-# Cursor style shared by terminal and inline inputs (line|block)\n\
-# cursor_style = block\n\
-# Enable cursor blink for terminal and inline inputs\n\
-# cursor_blink = true\n\
-# Terminal background opacity (0.0 = fully transparent, 1.0 = opaque)\n\
-# background_opacity = 1.0\n\
-# Enable/disable platform blur for transparent backgrounds\n\
-# background_blur = false\n\
-# Inner terminal padding in pixels\n\
-padding_x = 12\n\
-padding_y = 8\n\
-# Mouse wheel scroll speed multiplier\n\
-# mouse_scroll_multiplier = 3\n\
-# Terminal scrollbar visibility: always | on_scroll | off\n\
-# (while scrolled up in history, scrollbar stays visible in all modes)\n\
-# scrollbar_visibility = on_scroll\n\
-# Scrollbar style: neutral | muted_theme | theme\n\
-# scrollbar_style = neutral\n\
-\n\
-# Advanced runtime settings (usually leave these as defaults)\n\
-# Preferred shell executable path\n\
-# shell = /bin/zsh\n\
-# Fallback startup directory when working_dir is unset: home or process\n\
-# working_dir_fallback = home\n\
-# Advertise 24-bit color support to child apps\n\
-# colorterm = truecolor\n\
-# Scrollback history lines (lower = less memory, max 100000)\n\
-# scrollback_history = 2000\n\
-# Scrollback for inactive tabs (saves memory with many tabs)\n\
-# inactive_tab_scrollback = 500\n\
-# Keybindings (Ghostty-style trigger overrides)\n\
-# keybind = cmd-p=toggle_command_palette\n\
-# keybind = cmd-c=copy\n\
-# keybind = cmd-c=unbind\n\
-# keybind = clear\n\
-# Show/hide shortcut badges in command palette\n\
-# command_palette_show_keybinds = true\n";
+pub struct LoadedConfig {
+    pub path: PathBuf,
+    pub config: AppConfig,
+    pub diagnostics: Vec<ConfigDiagnostic>,
+}
 
-pub fn load_or_create() -> AppConfig {
-    let mut config = AppConfig::default();
-    let Some(path) = ensure_config_file() else {
-        return config;
-    };
+pub struct RuntimeConfigLoad {
+    pub config: AppConfig,
+    pub path: Option<PathBuf>,
+    pub fingerprint: Option<u64>,
+    pub loaded_from_disk: bool,
+}
 
-    if let Ok(contents) = fs::read_to_string(&path) {
-        config = AppConfig::from_contents(&contents);
+pub(crate) const DEFAULT_CONFIG: &str = include_str!("default_config.txt");
+
+pub fn load_or_create() -> Result<LoadedConfig, ConfigIoError> {
+    let path = ensure_config_file()?;
+    let contents = fs::read_to_string(&path).map_err(|source| ConfigIoError::ReadConfig {
+        path: path.clone(),
+        source,
+    })?;
+    let report = AppConfig::from_contents_with_report(&contents);
+
+    Ok(LoadedConfig {
+        path,
+        config: report.config,
+        diagnostics: report.diagnostics,
+    })
+}
+
+pub fn log_parse_diagnostics(diagnostics: &[ConfigDiagnostic]) {
+    for diagnostic in diagnostics {
+        log::warn!(
+            "Config diagnostic line {} [{:?}]: {}",
+            diagnostic.line_number,
+            diagnostic.kind,
+            diagnostic.message
+        );
+    }
+}
+
+pub fn summarize_parse_diagnostics(diagnostics: &[ConfigDiagnostic]) -> Option<String> {
+    if diagnostics.is_empty() {
+        return None;
     }
 
-    config
+    let first = &diagnostics[0];
+    Some(format!(
+        "Config has {} warning(s). First: line {} [{}] {}",
+        diagnostics.len(),
+        first.line_number,
+        diagnostic_kind_label(first.kind),
+        first.message
+    ))
+}
+
+pub fn show_parse_diagnostics_toast(diagnostics: &[ConfigDiagnostic]) {
+    let Some(summary) = summarize_parse_diagnostics(diagnostics) else {
+        return;
+    };
+
+    termy_toast::enqueue_toast(
+        termy_toast::ToastKind::Warning,
+        summary,
+        Some(Duration::from_secs(10)),
+    );
+}
+
+pub fn config_fingerprint(path: &Path) -> Option<u64> {
+    let contents = fs::read(path).ok()?;
+    let mut hasher = DefaultHasher::new();
+    contents.hash(&mut hasher);
+    Some(hasher.finish())
+}
+
+pub fn report_config_error_once(
+    previous_error: &mut Option<String>,
+    error_context: &'static str,
+    error: &ConfigIoError,
+) {
+    let error_message = error.to_string();
+    if previous_error.as_deref() == Some(error_message.as_str()) {
+        return;
+    }
+
+    log::error!("{}: {}", error_context, error_message);
+    termy_toast::error(error_message.clone());
+    *previous_error = Some(error_message);
+}
+
+pub fn load_runtime_config(
+    previous_error: &mut Option<String>,
+    error_context: &'static str,
+) -> RuntimeConfigLoad {
+    match load_or_create() {
+        Ok(loaded) => {
+            log_parse_diagnostics(&loaded.diagnostics);
+            show_parse_diagnostics_toast(&loaded.diagnostics);
+            *previous_error = None;
+            let fingerprint = config_fingerprint(&loaded.path);
+            RuntimeConfigLoad {
+                config: loaded.config,
+                path: Some(loaded.path),
+                fingerprint,
+                loaded_from_disk: true,
+            }
+        }
+        Err(error) => {
+            report_config_error_once(previous_error, error_context, &error);
+            let path = ensure_config_file().ok();
+            let fingerprint = path.as_deref().and_then(config_fingerprint);
+            RuntimeConfigLoad {
+                config: AppConfig::default(),
+                path,
+                fingerprint,
+                loaded_from_disk: false,
+            }
+        }
+    }
+}
+
+fn diagnostic_kind_label(kind: ConfigDiagnosticKind) -> &'static str {
+    match kind {
+        ConfigDiagnosticKind::UnknownSection => "unknown-section",
+        ConfigDiagnosticKind::UnknownRootKey => "unknown-root-key",
+        ConfigDiagnosticKind::UnknownColorKey => "unknown-color-key",
+        ConfigDiagnosticKind::InvalidSyntax => "invalid-syntax",
+        ConfigDiagnosticKind::InvalidValue => "invalid-value",
+        ConfigDiagnosticKind::DuplicateRootKey => "duplicate-root-key",
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn default_config_parses_without_diagnostics() {
+        let report = AppConfig::from_contents_with_report(DEFAULT_CONFIG);
+        assert!(
+            report.diagnostics.is_empty(),
+            "expected no diagnostics but got: {:?}",
+            report.diagnostics
+        );
+    }
+
+    #[test]
+    fn default_config_template_matches_default_struct() {
+        let parsed = AppConfig::from_contents(DEFAULT_CONFIG);
+        assert_eq!(parsed, AppConfig::default());
+    }
+
+    #[test]
+    fn default_config_root_keys_are_known() {
+        let mut in_section = false;
+
+        for line in DEFAULT_CONFIG.lines() {
+            let trimmed = line.trim();
+            if trimmed.is_empty() || trimmed.starts_with('#') {
+                continue;
+            }
+            if trimmed.starts_with('[') && trimmed.ends_with(']') {
+                in_section = true;
+                continue;
+            }
+            if in_section {
+                continue;
+            }
+
+            let (key, _) = trimmed
+                .split_once('=')
+                .expect("active config line must contain '='");
+            let key = key.trim();
+            assert!(
+                termy_config_core::VALID_ROOT_KEYS
+                    .iter()
+                    .any(|valid| valid.eq_ignore_ascii_case(key)),
+                "unknown root key in DEFAULT_CONFIG: {}",
+                key
+            );
+        }
+    }
+
+    #[test]
+    fn default_config_sections_are_known() {
+        for line in DEFAULT_CONFIG.lines() {
+            let trimmed = line.trim();
+            if !(trimmed.starts_with('[') && trimmed.ends_with(']')) {
+                continue;
+            }
+            let section_name = trimmed[1..trimmed.len() - 1].trim();
+            assert!(
+                termy_config_core::VALID_SECTIONS
+                    .iter()
+                    .any(|section| section.eq_ignore_ascii_case(section_name)),
+                "unknown section in DEFAULT_CONFIG: {}",
+                section_name
+            );
+        }
+    }
 }

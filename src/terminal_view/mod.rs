@@ -16,8 +16,7 @@ use gpui::{
     WeakEntity, Window, WindowBackgroundAppearance, div, point, px,
 };
 use std::{
-    env, fs,
-    hash::{DefaultHasher, Hash, Hasher},
+    env,
     path::{Path, PathBuf},
     process::Command,
     time::{Duration, Instant},
@@ -488,6 +487,7 @@ pub struct TerminalView {
     terminal_runtime: TerminalRuntimeConfig,
     config_path: Option<PathBuf>,
     config_fingerprint: Option<u64>,
+    last_config_error_message: Option<String>,
     font_family: SharedString,
     base_font_size: f32,
     font_size: Pixels,
@@ -568,13 +568,6 @@ impl TerminalView {
             working_dir_fallback,
             scrollback_history: config.scrollback_history,
         }
-    }
-
-    fn config_fingerprint(path: &PathBuf) -> Option<u64> {
-        let contents = fs::read(path).ok()?;
-        let mut hasher = DefaultHasher::new();
-        contents.hash(&mut hasher);
-        Some(hasher.finish())
     }
 
     fn user_home_dir() -> Option<PathBuf> {
@@ -938,8 +931,19 @@ impl TerminalView {
         })
         .detach();
 
-        let config_path = config::ensure_config_file();
-        let config_fingerprint = config_path.as_ref().and_then(Self::config_fingerprint);
+        let mut last_config_error_message = None;
+        let config_path = match config::ensure_config_file() {
+            Ok(path) => Some(path),
+            Err(error) => {
+                config::report_config_error_once(
+                    &mut last_config_error_message,
+                    "Failed to resolve config path for terminal view",
+                    &error,
+                );
+                None
+            }
+        };
+        let config_fingerprint = config_path.as_deref().and_then(config::config_fingerprint);
         let theme_id = config.theme.clone();
         let colors = TerminalColors::from_theme(&config.theme, &config.colors);
         let base_font_size = config.font_size.clamp(MIN_FONT_SIZE, MAX_FONT_SIZE);
@@ -989,6 +993,7 @@ impl TerminalView {
             terminal_runtime,
             config_path,
             config_fingerprint,
+            last_config_error_message,
             font_family: config.font_family.into(),
             base_font_size,
             font_size: px(base_font_size),
@@ -1136,15 +1141,24 @@ impl TerminalView {
         let path = match self.config_path.clone() {
             Some(path) => path,
             None => {
-                self.config_path = config::ensure_config_file();
-                match self.config_path.clone() {
-                    Some(path) => path,
-                    None => return false,
+                let loaded = config::load_runtime_config(
+                    &mut self.last_config_error_message,
+                    "Failed to reload config for terminal view",
+                );
+                self.config_path = loaded.path;
+                self.config_fingerprint = loaded.fingerprint;
+                if loaded.loaded_from_disk {
+                    let changed = self.apply_runtime_config(loaded.config, cx);
+                    if changed {
+                        termy_toast::info("Configuration reloaded");
+                    }
+                    return changed;
                 }
+                return false;
             }
         };
 
-        let Some(fingerprint) = Self::config_fingerprint(&path) else {
+        let Some(fingerprint) = config::config_fingerprint(&path) else {
             return false;
         };
 
@@ -1152,21 +1166,33 @@ impl TerminalView {
             return false;
         }
 
-        self.config_fingerprint = Some(fingerprint);
-        let config = config::load_or_create();
-        let changed = self.apply_runtime_config(config, cx);
-        if changed {
-            termy_toast::info("Configuration reloaded");
+        let loaded = config::load_runtime_config(
+            &mut self.last_config_error_message,
+            "Failed to reload config for terminal view",
+        );
+        self.config_path = loaded.path;
+        self.config_fingerprint = loaded.fingerprint;
+        if loaded.loaded_from_disk {
+            let changed = self.apply_runtime_config(loaded.config, cx);
+            if changed {
+                termy_toast::info("Configuration reloaded");
+            }
+            changed
+        } else {
+            false
         }
-        changed
     }
 
     pub(super) fn reload_config(&mut self, cx: &mut Context<Self>) {
-        if let Some(path) = &self.config_path {
-            self.config_fingerprint = Self::config_fingerprint(path);
+        let loaded = config::load_runtime_config(
+            &mut self.last_config_error_message,
+            "Failed to reload config for terminal view",
+        );
+        self.config_path = loaded.path;
+        self.config_fingerprint = loaded.fingerprint;
+        if loaded.loaded_from_disk {
+            self.apply_runtime_config(loaded.config, cx);
         }
-        let config = config::load_or_create();
-        self.apply_runtime_config(config, cx);
     }
 
     pub(super) fn persist_theme_selection(

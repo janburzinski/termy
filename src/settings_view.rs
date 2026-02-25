@@ -7,9 +7,7 @@ use gpui::{
     Rgba, ScrollAnchor, ScrollHandle, ScrollWheelEvent, SharedString, StatefulInteractiveElement,
     Styled, TextAlign, WeakEntity, Window, deferred, div, point, prelude::FluentBuilder, px,
 };
-use std::collections::{HashMap, hash_map::DefaultHasher};
-use std::fs;
-use std::hash::{Hash, Hasher};
+use std::collections::HashMap;
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
@@ -242,6 +240,7 @@ pub struct SettingsWindow {
     config: AppConfig,
     config_path: Option<PathBuf>,
     config_fingerprint: Option<u64>,
+    last_config_error_message: Option<String>,
     available_font_families: Vec<String>,
     focus_handle: FocusHandle,
     active_input: Option<ActiveTextInput>,
@@ -260,9 +259,14 @@ pub struct SettingsWindow {
 
 impl SettingsWindow {
     pub fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
-        let config = config::load_or_create();
-        let config_path = config::ensure_config_file();
-        let config_fingerprint = config_path.as_ref().and_then(Self::config_fingerprint);
+        let mut last_config_error_message = None;
+        let loaded = config::load_runtime_config(
+            &mut last_config_error_message,
+            "Failed to load config for settings view",
+        );
+        let config = loaded.config;
+        let config_path = loaded.path;
+        let config_fingerprint = loaded.fingerprint;
         let config_change_rx = config::subscribe_config_changes();
         let mut available_font_families = window.text_system().all_font_names();
         available_font_families.sort_unstable_by_key(|font| font.to_ascii_lowercase());
@@ -278,6 +282,7 @@ impl SettingsWindow {
             config,
             config_path,
             config_fingerprint,
+            last_config_error_message,
             available_font_families,
             focus_handle: cx.focus_handle(),
             active_input: None,
@@ -330,13 +335,6 @@ impl SettingsWindow {
         .detach();
 
         view
-    }
-
-    fn config_fingerprint(path: &PathBuf) -> Option<u64> {
-        let contents = fs::read(path).ok()?;
-        let mut hasher = DefaultHasher::new();
-        contents.hash(&mut hasher);
-        Some(hasher.finish())
     }
 
     fn settings_section_label(section: SettingsSection) -> &'static str {
@@ -652,15 +650,21 @@ impl SettingsWindow {
         let path = match self.config_path.clone() {
             Some(path) => path,
             None => {
-                self.config_path = config::ensure_config_file();
-                match self.config_path.clone() {
-                    Some(path) => path,
-                    None => return false,
-                }
+                let loaded = config::load_runtime_config(
+                    &mut self.last_config_error_message,
+                    "Failed to reload config for settings view",
+                );
+                self.config_path = loaded.path;
+                self.config_fingerprint = loaded.fingerprint;
+                return if loaded.loaded_from_disk {
+                    self.apply_runtime_config(loaded.config)
+                } else {
+                    false
+                };
             }
         };
 
-        let Some(fingerprint) = Self::config_fingerprint(&path) else {
+        let Some(fingerprint) = config::config_fingerprint(&path) else {
             return false;
         };
 
@@ -668,9 +672,17 @@ impl SettingsWindow {
             return false;
         }
 
-        self.config_fingerprint = Some(fingerprint);
-        let config = config::load_or_create();
-        self.apply_runtime_config(config)
+        let loaded = config::load_runtime_config(
+            &mut self.last_config_error_message,
+            "Failed to reload config for settings view",
+        );
+        self.config_path = loaded.path;
+        self.config_fingerprint = loaded.fingerprint;
+        if loaded.loaded_from_disk {
+            self.apply_runtime_config(loaded.config)
+        } else {
+            false
+        }
     }
 
     // Color helpers derived from terminal theme
@@ -2613,7 +2625,13 @@ impl SettingsWindow {
                             .hover(move |s| s.bg(accent_hover).text_color(button_hover_text))
                             .child("Open Config File")
                             .on_click(cx.listener(|_view, _, _, cx| {
-                                crate::config::open_config_file();
+                                if let Err(error) = crate::config::open_config_file() {
+                                    log::error!(
+                                        "Failed to open config file from settings: {}",
+                                        error
+                                    );
+                                    termy_toast::error(error.to_string());
+                                }
                                 cx.notify();
                             })),
                     ),

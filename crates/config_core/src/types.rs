@@ -1,0 +1,324 @@
+use crate::constants::{
+    DEFAULT_COLORTERM, DEFAULT_CURSOR_BLINK, DEFAULT_INACTIVE_TAB_SCROLLBACK,
+    DEFAULT_MOUSE_SCROLL_MULTIPLIER, DEFAULT_SCROLLBACK_HISTORY, DEFAULT_TAB_TITLE_COMMAND_FORMAT,
+    DEFAULT_TAB_TITLE_EXPLICIT_PREFIX, DEFAULT_TAB_TITLE_FALLBACK, DEFAULT_TAB_TITLE_PROMPT_FORMAT,
+    DEFAULT_TERM, DEFAULT_WARN_ON_QUIT_WITH_RUNNING_PROCESS,
+};
+
+pub type ThemeId = String;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Rgb8 {
+    pub r: u8,
+    pub g: u8,
+    pub b: u8,
+}
+
+impl Rgb8 {
+    pub fn from_hex(value: &str) -> Option<Self> {
+        let hex = value.trim().trim_start_matches('#');
+        if hex.len() != 6 {
+            return None;
+        }
+
+        let r = u8::from_str_radix(&hex[0..2], 16).ok()?;
+        let g = u8::from_str_radix(&hex[2..4], 16).ok()?;
+        let b = u8::from_str_radix(&hex[4..6], 16).ok()?;
+        Some(Self { r, g, b })
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TabTitleSource {
+    Manual,
+    Explicit,
+    Shell,
+    Fallback,
+}
+
+impl TabTitleSource {
+    pub(crate) fn from_str(value: &str) -> Option<Self> {
+        match value.trim().to_ascii_lowercase().as_str() {
+            "manual" => Some(Self::Manual),
+            "explicit" => Some(Self::Explicit),
+            "shell" | "app" | "terminal" => Some(Self::Shell),
+            "fallback" | "default" => Some(Self::Fallback),
+            _ => None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TabTitleMode {
+    Smart,
+    Shell,
+    Explicit,
+    Static,
+}
+
+impl TabTitleMode {
+    pub(crate) fn from_str(value: &str) -> Option<Self> {
+        match value.trim().to_ascii_lowercase().as_str() {
+            "smart" => Some(Self::Smart),
+            "shell" => Some(Self::Shell),
+            "explicit" => Some(Self::Explicit),
+            "static" => Some(Self::Static),
+            _ => None,
+        }
+    }
+
+    pub(crate) fn default_priority(self) -> Vec<TabTitleSource> {
+        match self {
+            Self::Smart => vec![
+                TabTitleSource::Manual,
+                TabTitleSource::Explicit,
+                TabTitleSource::Shell,
+                TabTitleSource::Fallback,
+            ],
+            Self::Shell => vec![
+                TabTitleSource::Manual,
+                TabTitleSource::Shell,
+                TabTitleSource::Fallback,
+            ],
+            Self::Explicit => vec![
+                TabTitleSource::Manual,
+                TabTitleSource::Explicit,
+                TabTitleSource::Fallback,
+            ],
+            Self::Static => vec![TabTitleSource::Manual, TabTitleSource::Fallback],
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum TabCloseVisibility {
+    #[default]
+    ActiveHover,
+    Hover,
+    Always,
+}
+
+impl TabCloseVisibility {
+    pub(crate) fn from_str(value: &str) -> Option<Self> {
+        match value.trim().to_ascii_lowercase().as_str() {
+            "active_hover" | "activehover" | "active+hover" => Some(Self::ActiveHover),
+            "hover" => Some(Self::Hover),
+            "always" => Some(Self::Always),
+            _ => None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum TabWidthMode {
+    Stable,
+    ActiveGrow,
+    #[default]
+    ActiveGrowSticky,
+}
+
+impl TabWidthMode {
+    pub(crate) fn from_str(value: &str) -> Option<Self> {
+        match value.trim().to_ascii_lowercase().as_str() {
+            "stable" => Some(Self::Stable),
+            "active_grow" | "activegrow" | "active-grow" => Some(Self::ActiveGrow),
+            "active_grow_sticky" | "activegrowsticky" | "active-grow-sticky" => {
+                Some(Self::ActiveGrowSticky)
+            }
+            _ => None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct TabTitleConfig {
+    pub mode: TabTitleMode,
+    pub priority: Vec<TabTitleSource>,
+    pub fallback: String,
+    pub explicit_prefix: String,
+    pub shell_integration: bool,
+    pub prompt_format: String,
+    pub command_format: String,
+}
+
+impl Default for TabTitleConfig {
+    fn default() -> Self {
+        Self {
+            mode: TabTitleMode::Smart,
+            priority: TabTitleMode::Smart.default_priority(),
+            fallback: DEFAULT_TAB_TITLE_FALLBACK.to_string(),
+            explicit_prefix: DEFAULT_TAB_TITLE_EXPLICIT_PREFIX.to_string(),
+            shell_integration: true,
+            prompt_format: DEFAULT_TAB_TITLE_PROMPT_FORMAT.to_string(),
+            command_format: DEFAULT_TAB_TITLE_COMMAND_FORMAT.to_string(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum CursorStyle {
+    Line,
+    #[default]
+    Block,
+}
+
+impl CursorStyle {
+    pub(crate) fn from_str(value: &str) -> Option<Self> {
+        match value.trim().to_ascii_lowercase().as_str() {
+            "line" | "bar" | "beam" | "ibeam" => Some(Self::Line),
+            "block" | "box" => Some(Self::Block),
+            _ => None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum TerminalScrollbarVisibility {
+    Off,
+    Always,
+    #[default]
+    OnScroll,
+}
+
+impl TerminalScrollbarVisibility {
+    pub(crate) fn from_str(value: &str) -> Option<Self> {
+        match value.trim().to_ascii_lowercase().as_str() {
+            "off" => Some(Self::Off),
+            "always" => Some(Self::Always),
+            "on_scroll" | "onscroll" => Some(Self::OnScroll),
+            _ => None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum TerminalScrollbarStyle {
+    #[default]
+    Neutral,
+    MutedTheme,
+    Theme,
+}
+
+impl TerminalScrollbarStyle {
+    pub(crate) fn from_str(value: &str) -> Option<Self> {
+        match value.trim().to_ascii_lowercase().as_str() {
+            "neutral" => Some(Self::Neutral),
+            "muted_theme" | "mutedtheme" => Some(Self::MutedTheme),
+            "theme" => Some(Self::Theme),
+            _ => None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct CustomColors {
+    pub foreground: Option<Rgb8>,
+    pub background: Option<Rgb8>,
+    pub cursor: Option<Rgb8>,
+    pub ansi: [Option<Rgb8>; 16],
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct AppConfig {
+    pub theme: ThemeId,
+    pub working_dir: Option<String>,
+    pub working_dir_fallback: WorkingDirFallback,
+    pub warn_on_quit_with_running_process: bool,
+    pub tab_title: TabTitleConfig,
+    pub tab_close_visibility: TabCloseVisibility,
+    pub tab_width_mode: TabWidthMode,
+    pub show_termy_in_titlebar: bool,
+    pub shell: Option<String>,
+    pub term: String,
+    pub colorterm: Option<String>,
+    pub window_width: f32,
+    pub window_height: f32,
+    pub font_family: String,
+    pub font_size: f32,
+    pub cursor_style: CursorStyle,
+    pub cursor_blink: bool,
+    pub background_opacity: f32,
+    pub background_blur: bool,
+    pub padding_x: f32,
+    pub padding_y: f32,
+    pub mouse_scroll_multiplier: f32,
+    pub terminal_scrollbar_visibility: TerminalScrollbarVisibility,
+    pub terminal_scrollbar_style: TerminalScrollbarStyle,
+    pub scrollback_history: usize,
+    pub inactive_tab_scrollback: Option<usize>,
+    pub command_palette_show_keybinds: bool,
+    pub keybind_lines: Vec<KeybindConfigLine>,
+    pub colors: CustomColors,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct KeybindConfigLine {
+    pub line_number: usize,
+    pub value: String,
+}
+
+impl Default for AppConfig {
+    fn default() -> Self {
+        Self {
+            theme: "termy".to_string(),
+            working_dir: None,
+            working_dir_fallback: WorkingDirFallback::default(),
+            warn_on_quit_with_running_process: DEFAULT_WARN_ON_QUIT_WITH_RUNNING_PROCESS,
+            tab_title: TabTitleConfig::default(),
+            tab_close_visibility: TabCloseVisibility::default(),
+            tab_width_mode: TabWidthMode::default(),
+            show_termy_in_titlebar: true,
+            shell: None,
+            term: DEFAULT_TERM.to_string(),
+            colorterm: Some(DEFAULT_COLORTERM.to_string()),
+            window_width: 1280.0,
+            window_height: 820.0,
+            font_family: "JetBrains Mono".to_string(),
+            font_size: 14.0,
+            cursor_style: CursorStyle::default(),
+            cursor_blink: DEFAULT_CURSOR_BLINK,
+            background_opacity: 1.0,
+            background_blur: false,
+            padding_x: 12.0,
+            padding_y: 8.0,
+            mouse_scroll_multiplier: DEFAULT_MOUSE_SCROLL_MULTIPLIER,
+            terminal_scrollbar_visibility: TerminalScrollbarVisibility::default(),
+            terminal_scrollbar_style: TerminalScrollbarStyle::default(),
+            scrollback_history: DEFAULT_SCROLLBACK_HISTORY,
+            inactive_tab_scrollback: DEFAULT_INACTIVE_TAB_SCROLLBACK,
+            command_palette_show_keybinds: true,
+            keybind_lines: Vec::new(),
+            colors: CustomColors::default(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WorkingDirFallback {
+    Home,
+    Process,
+}
+
+impl WorkingDirFallback {
+    pub(crate) fn from_str(value: &str) -> Option<Self> {
+        match value.trim().to_ascii_lowercase().as_str() {
+            "home" | "user" => Some(Self::Home),
+            "process" | "cwd" => Some(Self::Process),
+            _ => None,
+        }
+    }
+}
+
+impl Default for WorkingDirFallback {
+    fn default() -> Self {
+        #[cfg(any(target_os = "macos", target_os = "windows"))]
+        {
+            Self::Home
+        }
+
+        #[cfg(not(any(target_os = "macos", target_os = "windows")))]
+        {
+            Self::Process
+        }
+    }
+}

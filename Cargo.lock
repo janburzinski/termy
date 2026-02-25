@@ -5502,6 +5502,7 @@ dependencies = [
  "rfd",
  "serde_json",
  "smol",
+ "tempfile",
  "termy_auto_update",
  "termy_auto_update_ui",
  "termy_config_core",

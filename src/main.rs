@@ -58,7 +58,12 @@ fn main() {
     env_logger::init();
 
     Application::new().run(|cx: &mut App| {
-        cx.on_action(|_: &OpenConfig, _cx| config::open_config_file());
+        cx.on_action(|_: &OpenConfig, _cx| {
+            if let Err(error) = config::open_config_file() {
+                log::error!("Failed to open config file: {}", error);
+                termy_toast::error(error.to_string());
+            }
+        });
         cx.on_action(|_: &OpenSettings, cx| {
             let bounds = Bounds::centered(None, size(px(800.0), px(600.0)), cx);
 
@@ -92,7 +97,10 @@ fn main() {
             .ok();
         });
 
-        let app_config = config::load_or_create();
+        let mut startup_config_error = None;
+        let startup_load =
+            config::load_runtime_config(&mut startup_config_error, "Failed to load config");
+        let app_config = startup_load.config;
         keybindings::install_keybindings(cx, &app_config);
         let window_background = initial_window_background_appearance(&app_config);
         let window_width = app_config.window_width;
