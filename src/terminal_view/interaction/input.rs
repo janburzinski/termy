@@ -129,7 +129,7 @@ impl TerminalView {
         self.reset_cursor_blink_phase();
         let key = event.keystroke.key.as_str();
 
-        if self.command_palette_open {
+        if self.is_command_palette_open() {
             self.handle_command_palette_key_down(key, window, cx);
             return;
         }

@@ -23,7 +23,7 @@ impl TerminalView {
 
         match action {
             CommandAction::ToggleCommandPalette => {
-                if self.command_palette_open {
+                if self.is_command_palette_open() {
                     self.close_command_palette(cx);
                 } else {
                     self.open_command_palette(cx);
@@ -31,8 +31,7 @@ impl TerminalView {
             }
             CommandAction::SwitchTheme => {
                 if let Some(mode) = Self::command_palette_mode_for_action(action) {
-                    self.command_palette_open = true;
-                    self.set_command_palette_mode(mode, false, cx);
+                    self.open_command_palette_in_mode(mode, cx);
                 }
             }
             CommandAction::Quit => {
