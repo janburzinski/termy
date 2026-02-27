@@ -1,5 +1,8 @@
 use std::path::{Path, PathBuf};
 
+#[cfg(any(target_os = "macos", target_os = "linux"))]
+use std::io::Write;
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum InstallShell {
     Zsh,
@@ -217,7 +220,31 @@ fn ensure_install_cli_profile_block(profile_path: &Path, block: &str) -> Result<
         return Ok(false);
     };
 
-    std::fs::write(profile_path, updated).map_err(|error| {
+    let temp_path = profile_path.with_extension("tmp");
+    {
+        let mut temp_file = std::fs::File::create(&temp_path).map_err(|error| {
+            format!(
+                "Failed to write shell config {}: {}",
+                profile_path.display(),
+                error
+            )
+        })?;
+        temp_file.write_all(updated.as_bytes()).map_err(|error| {
+            format!(
+                "Failed to write shell config {}: {}",
+                profile_path.display(),
+                error
+            )
+        })?;
+        temp_file.sync_all().map_err(|error| {
+            format!(
+                "Failed to write shell config {}: {}",
+                profile_path.display(),
+                error
+            )
+        })?;
+    }
+    std::fs::rename(&temp_path, profile_path).map_err(|error| {
         format!(
             "Failed to write shell config {}: {}",
             profile_path.display(),
@@ -381,10 +408,7 @@ fn find_cli_binary() -> Result<PathBuf, String> {
         }
     }
 
-    let possible_paths = [
-        PathBuf::from("./target/release/termy-cli"),
-        PathBuf::from("./target/debug/termy-cli"),
-    ];
+    let possible_paths = fallback_cli_binary_paths();
 
     for path in &possible_paths {
         if path.exists() {
@@ -393,6 +417,14 @@ fn find_cli_binary() -> Result<PathBuf, String> {
     }
 
     Err("CLI binary not found. Make sure to build it with: cargo build -p termy_cli".to_string())
+}
+
+fn fallback_cli_binary_paths() -> [PathBuf; 2] {
+    let exe_suffix = std::env::consts::EXE_SUFFIX;
+    [
+        PathBuf::from(format!("./target/release/termy-cli{exe_suffix}")),
+        PathBuf::from(format!("./target/debug/termy-cli{exe_suffix}")),
+    ]
 }
 
 #[cfg(test)]
@@ -509,5 +541,19 @@ mod tests {
         let abs = absolute_install_cli_source_path(rel).unwrap();
         assert!(abs.is_absolute());
         assert!(abs.ends_with(rel));
+    }
+
+    #[test]
+    fn fallback_cli_paths_include_platform_exe_suffix() {
+        let paths = fallback_cli_binary_paths();
+        let exe_suffix = std::env::consts::EXE_SUFFIX;
+        assert_eq!(
+            paths[0],
+            PathBuf::from(format!("./target/release/termy-cli{exe_suffix}"))
+        );
+        assert_eq!(
+            paths[1],
+            PathBuf::from(format!("./target/debug/termy-cli{exe_suffix}"))
+        );
     }
 }

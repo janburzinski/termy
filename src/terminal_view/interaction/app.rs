@@ -142,15 +142,19 @@ impl TerminalView {
             ..Default::default()
         });
 
-        cx.open_window(
+        let open_result = cx.open_window(
             WindowOptions {
                 window_bounds: Some(WindowBounds::Windowed(bounds)),
                 titlebar,
                 ..Default::default()
             },
             |window, cx| cx.new(|cx| SettingsWindow::new(window, cx)),
-        )
-        .ok();
+        );
+        if let Err(error) = open_result {
+            log::error!("Failed to open settings window: {}", error);
+            termy_toast::error(format!("Failed to open settings window: {}", error));
+            cx.notify();
+        }
     }
 
     fn check_for_updates_action(&mut self, cx: &mut Context<Self>) {
@@ -158,9 +162,9 @@ impl TerminalView {
         {
             if let Some(updater) = self.auto_updater.as_ref() {
                 AutoUpdater::check(updater.downgrade(), cx);
+                self.update_check_toast_id = Some(termy_toast::loading("Checking for updates"));
+                cx.notify();
             }
-            self.update_check_toast_id = Some(termy_toast::loading("Checking for updates"));
-            cx.notify();
         }
 
         #[cfg(not(target_os = "macos"))]

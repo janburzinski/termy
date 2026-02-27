@@ -95,7 +95,26 @@ impl TerminalView {
             return None;
         }
 
-        let mut grid = vec![vec![' '; cols]; rows];
+        let clamped_start = CellPos {
+            col: start.col.min(cols.saturating_sub(1)),
+            row: start.row.min(rows.saturating_sub(1)),
+        };
+        let clamped_end = CellPos {
+            col: end.col.min(cols.saturating_sub(1)),
+            row: end.row.min(rows.saturating_sub(1)),
+        };
+        let (selection_start, selection_end) = if (clamped_end.row, clamped_end.col)
+            < (clamped_start.row, clamped_start.col)
+        {
+            (clamped_end, clamped_start)
+        } else {
+            (clamped_start, clamped_end)
+        };
+
+        let min_row = selection_start.row;
+        let max_row = selection_end.row;
+        let grid_rows = max_row - min_row + 1;
+        let mut grid = vec![vec![' '; cols]; grid_rows];
         self.active_terminal().with_term(|term| {
             let content = term.renderable_content();
             for cell in content.display_iter {
@@ -105,26 +124,36 @@ impl TerminalView {
                     continue;
                 };
                 let col = cell.point.column.0;
-                if row >= rows || col >= cols {
+                if row < min_row || row > max_row || col >= cols {
                     continue;
                 }
 
                 let c = cell.cell.c;
                 if c != '\0' {
-                    grid[row][col] = if c.is_control() { ' ' } else { c };
+                    let grid_row = row - min_row;
+                    grid[grid_row][col] = if c.is_control() { ' ' } else { c };
                 }
             }
         });
 
         let mut lines = Vec::new();
-        for row in start.row..=end.row {
-            let col_start = if row == start.row { start.col } else { 0 };
-            let col_end = if row == end.row {
-                end.col
+        for row in min_row..=max_row {
+            let col_start = if row == selection_start.row {
+                selection_start.col
+            } else {
+                0
+            };
+            let col_end = if row == selection_end.row {
+                selection_end.col
             } else {
                 cols.saturating_sub(1)
             };
-            let mut line: String = grid[row][col_start..=col_end].iter().collect();
+            if col_start > col_end {
+                continue;
+            }
+
+            let grid_row = row - min_row;
+            let mut line: String = grid[grid_row][col_start..=col_end].iter().collect();
             while line.ends_with(' ') {
                 line.pop();
             }
@@ -268,24 +297,33 @@ impl TerminalView {
         {
             return Command::new("open")
                 .arg(url)
-                .status()
-                .map(|status| status.success())
+                .stdin(Stdio::null())
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .spawn()
+                .map(|_| true)
                 .unwrap_or(false);
         }
         #[cfg(target_os = "linux")]
         {
             return Command::new("xdg-open")
                 .arg(url)
-                .status()
-                .map(|status| status.success())
+                .stdin(Stdio::null())
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .spawn()
+                .map(|_| true)
                 .unwrap_or(false);
         }
         #[cfg(target_os = "windows")]
         {
             return Command::new("cmd")
                 .args(["/C", "start", "", url])
-                .status()
-                .map(|status| status.success())
+                .stdin(Stdio::null())
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .spawn()
+                .map(|_| true)
                 .unwrap_or(false);
         }
     }

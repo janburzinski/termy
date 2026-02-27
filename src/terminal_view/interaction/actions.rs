@@ -59,7 +59,9 @@ impl TerminalView {
             | CommandAction::SwitchTabRight => {
                 self.execute_tab_command_action(action, cx);
             }
-            CommandAction::MinimizeWindow => {}
+            CommandAction::MinimizeWindow => {
+                window.minimize_window();
+            }
             CommandAction::Copy | CommandAction::Paste => {
                 self.execute_input_command_action(action, cx);
             }

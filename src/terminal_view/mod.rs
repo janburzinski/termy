@@ -18,7 +18,7 @@ use gpui::{
 use std::{
     env,
     path::{Path, PathBuf},
-    process::Command,
+    process::{Command, Stdio},
     time::{Duration, Instant},
 };
 use termy_search::SearchState;
