@@ -243,6 +243,9 @@ fn pty_env_overrides(
 
     env_overrides.insert("TERM_PROGRAM".to_string(), "termy".to_string());
 
+    // Locale overrides are intentionally Unix-only. POSIX shells use libc locale
+    // (`LC_*`/`LANG`) for wcwidth/prompt width, while native Windows shells
+    // (`cmd.exe`/PowerShell) do not use this locale contract.
     #[cfg(unix)]
     {
         apply_utf8_locale_overrides(&mut env_overrides);
@@ -269,8 +272,13 @@ fn pty_env_overrides(
 
 #[cfg(unix)]
 fn locale_has_utf8_tag(locale: &str) -> bool {
-    let normalized = locale.trim().to_ascii_lowercase();
-    normalized.contains("utf-8") || normalized.contains("utf8")
+    let locale = locale.trim();
+    let locale = locale.split_once('@').map_or(locale, |(base, _)| base);
+    let Some((_, encoding)) = locale.split_once('.') else {
+        return false;
+    };
+    let encoding = encoding.trim();
+    encoding.eq_ignore_ascii_case("utf-8") || encoding.eq_ignore_ascii_case("utf8")
 }
 
 #[cfg(unix)]
@@ -919,6 +927,24 @@ mod tests {
     fn locale_override_plan_skips_when_utf8_present() {
         assert_eq!(
             super::utf8_locale_override_plan(Some("en_US.UTF-8"), Some("C"), Some("")),
+            super::Utf8LocaleOverridePlan::None
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn locale_override_plan_does_not_skip_for_utf8_substring_false_positive() {
+        assert_eq!(
+            super::utf8_locale_override_plan(Some("en_US.fakeutf8"), Some("C"), Some("")),
+            super::Utf8LocaleOverridePlan::LcAllAndLcCtype
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn locale_override_plan_skips_for_utf8_with_modifier() {
+        assert_eq!(
+            super::utf8_locale_override_plan(Some("en_US.UTF-8@variant"), Some("C"), Some("")),
             super::Utf8LocaleOverridePlan::None
         );
     }
