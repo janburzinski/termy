@@ -22,7 +22,7 @@ pub fn install_keybindings(cx: &mut App, config: &AppConfig) {
         CommandAction::from_command_id(binding.action).to_key_binding(&binding.trigger)
     }));
     cx.bind_keys(crate::commands::inline_input_keybindings());
-    cx.set_menus(vec![crate::app_menu()]);
+    cx.set_menus(crate::menus::app_menus());
 }
 
 pub(crate) fn resolve_keybinds_for_config(

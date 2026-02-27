@@ -35,12 +35,8 @@ impl TerminalView {
         }
     }
 
-    fn open_config_action(&mut self, cx: &mut Context<Self>) {
-        if let Err(error) = config::open_config_file() {
-            log::error!("Failed to open config file from command action: {}", error);
-            termy_toast::error(error.to_string());
-            cx.notify();
-        }
+    fn open_config_action(&mut self, _cx: &mut Context<Self>) {
+        crate::app_actions::open_config_file();
     }
 
     fn import_colors_action(&mut self, cx: &mut Context<Self>) {
@@ -119,42 +115,7 @@ impl TerminalView {
     }
 
     fn open_settings_action(&mut self, cx: &mut Context<Self>) {
-        use crate::settings_view::SettingsWindow;
-        use gpui::{Bounds, WindowBounds, WindowOptions, px, size};
-        let bounds = Bounds::centered(None, size(px(800.0), px(600.0)), cx);
-
-        #[cfg(target_os = "macos")]
-        let titlebar = Some(gpui::TitlebarOptions {
-            title: Some("Settings".into()),
-            appears_transparent: true,
-            traffic_light_position: Some(gpui::point(px(12.0), px(10.0))),
-            ..Default::default()
-        });
-        #[cfg(target_os = "windows")]
-        let titlebar = Some(gpui::TitlebarOptions {
-            title: Some("Settings".into()),
-            ..Default::default()
-        });
-        #[cfg(all(not(target_os = "macos"), not(target_os = "windows")))]
-        let titlebar = Some(gpui::TitlebarOptions {
-            title: Some("Settings".into()),
-            appears_transparent: true,
-            ..Default::default()
-        });
-
-        let open_result = cx.open_window(
-            WindowOptions {
-                window_bounds: Some(WindowBounds::Windowed(bounds)),
-                titlebar,
-                ..Default::default()
-            },
-            |window, cx| cx.new(|cx| SettingsWindow::new(window, cx)),
-        );
-        if let Err(error) = open_result {
-            log::error!("Failed to open settings window: {}", error);
-            termy_toast::error(format!("Failed to open settings window: {}", error));
-            cx.notify();
-        }
+        crate::app_actions::open_settings_window(cx);
     }
 
     fn check_for_updates_action(&mut self, cx: &mut Context<Self>) {
