@@ -327,8 +327,23 @@ impl SettingsWindow {
         }
     }
 
-    pub(super) fn render_keybindings_section(&mut self, cx: &mut Context<Self>) -> impl IntoElement {
-        let keybind_meta = Self::setting_metadata("keybind").expect("missing metadata for keybind");
+    pub(super) fn render_keybinding_row(
+        &self,
+        action: CommandId,
+        action_bindings: &HashMap<CommandId, String>,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let config_name = action.config_name().to_string();
+        let action_title = Self::action_title_from_config_name(action.config_name());
+        let is_capturing = self.capturing_action == Some(action);
+        let binding_display = if is_capturing {
+            "Press shortcut...".to_string()
+        } else {
+            action_bindings
+                .get(&action)
+                .map(|trigger| Self::display_trigger_for_os(trigger))
+                .unwrap_or_else(|| "Unbound".to_string())
+        };
         let bg_card = self.bg_card();
         let border_color = self.border_color();
         let input_bg = self.bg_input();
@@ -338,115 +353,135 @@ impl SettingsWindow {
         let text_primary = self.text_primary();
         let text_muted = self.text_muted();
         let text_secondary = self.text_secondary();
+        let binding_hover_bg = if is_capturing { accent_hover } else { hover_bg };
+        let binding_text_color = if is_capturing { text_primary } else { text_secondary };
+
+        div()
+            .id(SharedString::from(format!("keybind-row-{}", config_name)))
+            .flex()
+            .items_center()
+            .justify_between()
+            .gap_4()
+            .py_3()
+            .px_4()
+            .rounded(px(0.0))
+            .bg(bg_card)
+            .border_1()
+            .border_color(if is_capturing { accent } else { border_color })
+            .child(self.render_keybinding_row_labels(action_title, config_name, text_primary, text_muted))
+            .child(self.render_keybinding_row_actions(
+                action,
+                binding_display,
+                is_capturing,
+                binding_hover_bg,
+                binding_text_color,
+                text_primary,
+                text_secondary,
+                input_bg,
+                border_color,
+                hover_bg,
+                accent,
+                cx,
+            ))
+            .into_any_element()
+    }
+
+    pub(super) fn render_keybinding_row_labels(
+        &self,
+        action_title: String,
+        config_name: String,
+        text_primary: Rgba,
+        text_muted: Rgba,
+    ) -> AnyElement {
+        div()
+            .flex()
+            .flex_col()
+            .gap(px(2.0))
+            .child(
+                div()
+                    .text_sm()
+                    .font_weight(gpui::FontWeight::MEDIUM)
+                    .text_color(text_primary)
+                    .child(action_title),
+            )
+            .child(div().text_xs().text_color(text_muted).child(config_name))
+            .into_any_element()
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub(super) fn render_keybinding_row_actions(
+        &self,
+        action: CommandId,
+        binding_display: String,
+        is_capturing: bool,
+        binding_hover_bg: Rgba,
+        binding_text_color: Rgba,
+        text_primary: Rgba,
+        text_secondary: Rgba,
+        input_bg: Rgba,
+        border_color: Rgba,
+        hover_bg: Rgba,
+        accent: Rgba,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        div()
+            .flex()
+            .items_center()
+            .gap_2()
+            .child(
+                div()
+                    .id(SharedString::from(format!("keybind-bind-{}", action.config_name())))
+                    .w(px(SETTINGS_CONTROL_WIDTH))
+                    .px_3()
+                    .py_1()
+                    .rounded(px(0.0))
+                    .bg(input_bg)
+                    .border_1()
+                    .border_color(if is_capturing { accent } else { border_color })
+                    .text_sm()
+                    .text_color(binding_text_color)
+                    .cursor_pointer()
+                    .hover(move |s| s.bg(binding_hover_bg).text_color(text_primary))
+                    .on_click(cx.listener(move |view, _, window, cx| {
+                        if view.capturing_action == Some(action) {
+                            view.capturing_action = None;
+                            cx.notify();
+                            return;
+                        }
+                        view.begin_action_binding_capture(action, window, cx);
+                    }))
+                    .child(binding_display),
+            )
+            .child(
+                div()
+                    .id(SharedString::from(format!("keybind-clear-{}", action.config_name())))
+                    .px_3()
+                    .py_1()
+                    .rounded(px(0.0))
+                    .bg(input_bg)
+                    .text_sm()
+                    .font_weight(gpui::FontWeight::MEDIUM)
+                    .text_color(text_secondary)
+                    .cursor_pointer()
+                    .hover(move |s| s.bg(hover_bg).text_color(text_primary))
+                    .child("Clear")
+                    .on_click(cx.listener(move |view, _, _, cx| {
+                        view.clear_action_binding(action, cx);
+                    })),
+            )
+            .into_any_element()
+    }
+
+    pub(super) fn render_keybindings_section(&mut self, cx: &mut Context<Self>) -> impl IntoElement {
+        let keybind_meta = Self::setting_metadata("keybind").expect("missing metadata for keybind");
         let action_bindings = self.effective_action_bindings();
         let rows = Self::bindable_actions()
             .into_iter()
-            .map(|action| {
-                let config_name = action.config_name().to_string();
-                let action_title = Self::action_title_from_config_name(action.config_name());
-                let is_capturing = self.capturing_action == Some(action);
-                let binding_display = if is_capturing {
-                    "Press shortcut...".to_string()
-                } else {
-                    action_bindings
-                        .get(&action)
-                        .map(|trigger| Self::display_trigger_for_os(trigger))
-                        .unwrap_or_else(|| "Unbound".to_string())
-                };
-                let binding_hover_bg = if is_capturing { accent_hover } else { hover_bg };
-                let binding_text_color = if is_capturing {
-                    text_primary
-                } else {
-                    text_secondary
-                };
-
-                div()
-                    .id(SharedString::from(format!("keybind-row-{}", config_name)))
-                    .flex()
-                    .items_center()
-                    .justify_between()
-                    .gap_4()
-                    .py_3()
-                    .px_4()
-                    .rounded(px(0.0))
-                    .bg(bg_card)
-                    .border_1()
-                    .border_color(if is_capturing { accent } else { border_color })
-                    .child(
-                        div()
-                            .flex()
-                            .flex_col()
-                            .gap(px(2.0))
-                            .child(
-                                div()
-                                    .text_sm()
-                                    .font_weight(gpui::FontWeight::MEDIUM)
-                                    .text_color(text_primary)
-                                    .child(action_title),
-                            )
-                            .child(
-                                div()
-                                    .text_xs()
-                                    .text_color(text_muted)
-                                    .child(config_name),
-                            ),
-                    )
-                    .child(
-                        div()
-                            .flex()
-                            .items_center()
-                            .gap_2()
-                            .child(
-                                div()
-                                    .id(SharedString::from(format!(
-                                        "keybind-bind-{}",
-                                        action.config_name()
-                                    )))
-                                    .w(px(SETTINGS_CONTROL_WIDTH))
-                                    .px_3()
-                                    .py_1()
-                                    .rounded(px(0.0))
-                                    .bg(input_bg)
-                                    .border_1()
-                                    .border_color(if is_capturing { accent } else { border_color })
-                                    .text_sm()
-                                    .text_color(binding_text_color)
-                                    .cursor_pointer()
-                                    .hover(move |s| s.bg(binding_hover_bg).text_color(text_primary))
-                                    .on_click(cx.listener(move |view, _, window, cx| {
-                                        if view.capturing_action == Some(action) {
-                                            view.capturing_action = None;
-                                            cx.notify();
-                                            return;
-                                        }
-                                        view.begin_action_binding_capture(action, window, cx);
-                                    }))
-                                    .child(binding_display),
-                            )
-                            .child(
-                                div()
-                                    .id(SharedString::from(format!(
-                                        "keybind-clear-{}",
-                                        action.config_name()
-                                    )))
-                                    .px_3()
-                                    .py_1()
-                                    .rounded(px(0.0))
-                                    .bg(input_bg)
-                                    .text_sm()
-                                    .font_weight(gpui::FontWeight::MEDIUM)
-                                    .text_color(text_secondary)
-                                    .cursor_pointer()
-                                    .hover(move |s| s.bg(hover_bg).text_color(text_primary))
-                                    .child("Clear")
-                                    .on_click(cx.listener(move |view, _, _, cx| {
-                                        view.clear_action_binding(action, cx);
-                                    })),
-                            ),
-                    )
-                    .into_any_element()
-            })
+            .map(|action| self.render_keybinding_row(action, &action_bindings, cx))
             .collect::<Vec<_>>();
+        let bg_card = self.bg_card();
+        let border_color = self.border_color();
+        let text_muted = self.text_muted();
 
         div()
             .flex()
@@ -459,39 +494,32 @@ impl SettingsWindow {
                 cx,
             ))
             .child(
-                div()
-                    .flex()
-                    .items_center()
-                    .mt_4()
-                    .mb_2()
-                    .child(
-                        div()
-                            .text_xs()
-                            .font_weight(gpui::FontWeight::SEMIBOLD)
-                            .text_color(text_muted)
-                            .child("SHORTCUTS"),
-                    ),
-            )
-            .child(
-                self.wrap_setting_with_scroll_anchor(
-                    keybind_meta.key,
+                div().flex().items_center().mt_4().mb_2().child(
                     div()
-                        .flex()
-                        .flex_col()
-                        .gap_2()
-                        .child(
-                            div()
-                                .py_4()
-                                .px_4()
-                                .rounded(px(0.0))
-                                .bg(bg_card)
-                                .border_1()
-                                .border_color(border_color)
-                                .child(div().flex().flex_col().gap_2().children(rows)),
-                        )
-                        .into_any_element(),
+                        .text_xs()
+                        .font_weight(gpui::FontWeight::SEMIBOLD)
+                        .text_color(text_muted)
+                        .child("SHORTCUTS"),
                 ),
             )
+            .child(self.wrap_setting_with_scroll_anchor(
+                keybind_meta.key,
+                div()
+                    .flex()
+                    .flex_col()
+                    .gap_2()
+                    .child(
+                        div()
+                            .py_4()
+                            .px_4()
+                            .rounded(px(0.0))
+                            .bg(bg_card)
+                            .border_1()
+                            .border_color(border_color)
+                            .child(div().flex().flex_col().gap_2().children(rows)),
+                    )
+                    .into_any_element(),
+            ))
             .child(
                 div()
                     .text_xs()
