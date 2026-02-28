@@ -222,9 +222,8 @@ impl SettingsWindow {
     }
 
     fn key_requires_secondary_only(event: &KeyDownEvent, key: &str) -> bool {
-        event.keystroke.modifiers.secondary()
+        (event.keystroke.modifiers.secondary() || event.keystroke.modifiers.control)
             && !event.keystroke.modifiers.alt
-            && !event.keystroke.modifiers.control
             && !event.keystroke.modifiers.function
             && event.keystroke.key.eq_ignore_ascii_case(key)
     }

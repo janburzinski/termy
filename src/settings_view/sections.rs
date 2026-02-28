@@ -1,6 +1,35 @@
 use super::*;
+use super::search::SettingMetadata;
+use std::collections::HashSet;
+use std::sync::{LazyLock, Mutex};
+
+const FALLBACK_SETTING_METADATA: SettingMetadata = SettingMetadata {
+    key: "__missing_setting_metadata__",
+    section: SettingsSection::Advanced,
+    title: "Unknown setting",
+    description: "Metadata unavailable for this setting.",
+    keywords: &[],
+};
+
+static LOGGED_MISSING_METADATA_KEYS: LazyLock<Mutex<HashSet<&'static str>>> =
+    LazyLock::new(|| Mutex::new(HashSet::new()));
 
 impl SettingsWindow {
+    fn setting_metadata_or_fallback(key: &'static str) -> &'static SettingMetadata {
+        if let Some(metadata) = Self::setting_metadata(key) {
+            return metadata;
+        }
+
+        let mut logged = LOGGED_MISSING_METADATA_KEYS
+            .lock()
+            .unwrap_or_else(|poison| poison.into_inner());
+        if logged.insert(key) {
+            log::error!("Missing settings metadata for key '{}'", key);
+        }
+
+        &FALLBACK_SETTING_METADATA
+    }
+
     pub(super) fn render_content(&mut self, cx: &mut Context<Self>) -> AnyElement {
         div()
             .w_full()
@@ -24,19 +53,13 @@ impl SettingsWindow {
         let font_size = self.config.font_size;
         let padding_x = self.config.padding_x;
         let padding_y = self.config.padding_y;
-        let theme_meta = Self::setting_metadata("theme").expect("missing metadata for theme");
-        let blur_meta = Self::setting_metadata("background_blur")
-            .expect("missing metadata for background_blur");
-        let opacity_meta = Self::setting_metadata("background_opacity")
-            .expect("missing metadata for background_opacity");
-        let font_family_meta =
-            Self::setting_metadata("font_family").expect("missing metadata for font_family");
-        let font_size_meta =
-            Self::setting_metadata("font_size").expect("missing metadata for font_size");
-        let padding_x_meta =
-            Self::setting_metadata("padding_x").expect("missing metadata for padding_x");
-        let padding_y_meta =
-            Self::setting_metadata("padding_y").expect("missing metadata for padding_y");
+        let theme_meta = Self::setting_metadata_or_fallback("theme");
+        let blur_meta = Self::setting_metadata_or_fallback("background_blur");
+        let opacity_meta = Self::setting_metadata_or_fallback("background_opacity");
+        let font_family_meta = Self::setting_metadata_or_fallback("font_family");
+        let font_size_meta = Self::setting_metadata_or_fallback("font_size");
+        let padding_x_meta = Self::setting_metadata_or_fallback("padding_x");
+        let padding_y_meta = Self::setting_metadata_or_fallback("padding_y");
 
         div()
             .flex()
@@ -140,9 +163,9 @@ impl SettingsWindow {
 
     pub(super) fn render_terminal_cursor_group(&mut self, cx: &mut Context<Self>) -> AnyElement {
         let cursor_blink_meta =
-            Self::setting_metadata("cursor_blink").expect("missing metadata for cursor_blink");
+            Self::setting_metadata_or_fallback("cursor_blink");
         let cursor_style_meta =
-            Self::setting_metadata("cursor_style").expect("missing metadata for cursor_style");
+            Self::setting_metadata_or_fallback("cursor_style");
         let cursor_blink = self.config.cursor_blink;
 
         div()
@@ -177,10 +200,10 @@ impl SettingsWindow {
     }
 
     pub(super) fn render_terminal_shell_group(&mut self, cx: &mut Context<Self>) -> AnyElement {
-        let shell_meta = Self::setting_metadata("shell").expect("missing metadata for shell");
-        let term_meta = Self::setting_metadata("term").expect("missing metadata for term");
+        let shell_meta = Self::setting_metadata_or_fallback("shell");
+        let term_meta = Self::setting_metadata_or_fallback("term");
         let colorterm_meta =
-            Self::setting_metadata("colorterm").expect("missing metadata for colorterm");
+            Self::setting_metadata_or_fallback("colorterm");
         let shell = self
             .config
             .shell
@@ -223,16 +246,12 @@ impl SettingsWindow {
     }
 
     pub(super) fn render_terminal_scrolling_group(&mut self, cx: &mut Context<Self>) -> AnyElement {
-        let scrollback_meta = Self::setting_metadata("scrollback_history")
-            .expect("missing metadata for scrollback_history");
-        let scroll_mult_meta = Self::setting_metadata("mouse_scroll_multiplier")
-            .expect("missing metadata for mouse_scroll_multiplier");
-        let inactive_scrollback_meta = Self::setting_metadata("inactive_tab_scrollback")
-            .expect("missing metadata for inactive_tab_scrollback");
-        let scrollbar_visibility_meta = Self::setting_metadata("scrollbar_visibility")
-            .expect("missing metadata for scrollbar_visibility");
-        let scrollbar_style_meta = Self::setting_metadata("scrollbar_style")
-            .expect("missing metadata for scrollbar_style");
+        let scrollback_meta = Self::setting_metadata_or_fallback("scrollback_history");
+        let scroll_mult_meta = Self::setting_metadata_or_fallback("mouse_scroll_multiplier");
+        let inactive_scrollback_meta =
+            Self::setting_metadata_or_fallback("inactive_tab_scrollback");
+        let scrollbar_visibility_meta = Self::setting_metadata_or_fallback("scrollbar_visibility");
+        let scrollbar_style_meta = Self::setting_metadata_or_fallback("scrollbar_style");
         let scrollback = self.config.scrollback_history;
         let inactive_scrollback = self.config.inactive_tab_scrollback.unwrap_or(0);
         let scroll_mult = self.config.mouse_scroll_multiplier;
@@ -283,8 +302,7 @@ impl SettingsWindow {
     }
 
     pub(super) fn render_terminal_ui_group(&mut self, cx: &mut Context<Self>) -> AnyElement {
-        let palette_meta = Self::setting_metadata("command_palette_show_keybinds")
-            .expect("missing metadata for command_palette_show_keybinds");
+        let palette_meta = Self::setting_metadata_or_fallback("command_palette_show_keybinds");
         let command_palette_show_keybinds = self.config.command_palette_show_keybinds;
 
         div()
@@ -336,20 +354,16 @@ impl SettingsWindow {
         let explicit_prefix = self.config.tab_title.explicit_prefix.clone();
         let prompt_format = self.config.tab_title.prompt_format.clone();
         let command_format = self.config.tab_title.command_format.clone();
-        let shell_integration_meta = Self::setting_metadata("tab_title_shell_integration")
-            .expect("missing metadata for tab_title_shell_integration");
-        let title_mode_meta =
-            Self::setting_metadata("tab_title_mode").expect("missing metadata for tab_title_mode");
-        let fallback_meta =
-            Self::setting_metadata("tab_title_fallback").expect("missing metadata for tab_title_fallback");
-        let title_priority_meta = Self::setting_metadata("tab_title_priority")
-            .expect("missing metadata for tab_title_priority");
-        let explicit_prefix_meta = Self::setting_metadata("tab_title_explicit_prefix")
-            .expect("missing metadata for tab_title_explicit_prefix");
-        let prompt_format_meta = Self::setting_metadata("tab_title_prompt_format")
-            .expect("missing metadata for tab_title_prompt_format");
-        let command_format_meta = Self::setting_metadata("tab_title_command_format")
-            .expect("missing metadata for tab_title_command_format");
+        let shell_integration_meta =
+            Self::setting_metadata_or_fallback("tab_title_shell_integration");
+        let title_mode_meta = Self::setting_metadata_or_fallback("tab_title_mode");
+        let fallback_meta = Self::setting_metadata_or_fallback("tab_title_fallback");
+        let title_priority_meta = Self::setting_metadata_or_fallback("tab_title_priority");
+        let explicit_prefix_meta =
+            Self::setting_metadata_or_fallback("tab_title_explicit_prefix");
+        let prompt_format_meta = Self::setting_metadata_or_fallback("tab_title_prompt_format");
+        let command_format_meta =
+            Self::setting_metadata_or_fallback("tab_title_command_format");
 
         div()
             .child(self.render_group_header("TAB TITLES"))
@@ -428,10 +442,8 @@ impl SettingsWindow {
     pub(super) fn render_tabs_strip_group(&mut self, cx: &mut Context<Self>) -> AnyElement {
         let close_visibility = self.editable_field_value(EditableField::TabCloseVisibility);
         let width_mode = self.editable_field_value(EditableField::TabWidthMode);
-        let close_visibility_meta = Self::setting_metadata("tab_close_visibility")
-            .expect("missing metadata for tab_close_visibility");
-        let width_mode_meta = Self::setting_metadata("tab_width_mode")
-            .expect("missing metadata for tab_width_mode");
+        let close_visibility_meta = Self::setting_metadata_or_fallback("tab_close_visibility");
+        let width_mode_meta = Self::setting_metadata_or_fallback("tab_width_mode");
 
         div()
             .child(self.render_group_header("TAB STRIP"))
@@ -456,8 +468,7 @@ impl SettingsWindow {
 
     pub(super) fn render_tabs_titlebar_group(&mut self, cx: &mut Context<Self>) -> AnyElement {
         let show_termy = self.config.show_termy_in_titlebar;
-        let show_termy_meta = Self::setting_metadata("show_termy_in_titlebar")
-            .expect("missing metadata for show_termy_in_titlebar");
+        let show_termy_meta = Self::setting_metadata_or_fallback("show_termy_in_titlebar");
 
         div()
             .child(self.render_group_header("TITLE BAR"))
@@ -503,16 +514,18 @@ impl SettingsWindow {
         let accent_hover = self.accent_with_alpha(0.8);
         let button_text = self.contrasting_text_for_fill(accent, bg_card);
         let button_hover_text = self.contrasting_text_for_fill(accent_hover, bg_card);
-        let working_dir_meta = Self::setting_metadata("working_dir")
-            .expect("missing metadata for working_dir");
-        let working_dir_fallback_meta = Self::setting_metadata("working_dir_fallback")
-            .expect("missing metadata for working_dir_fallback");
-        let warn_on_quit_meta = Self::setting_metadata("warn_on_quit_with_running_process")
-            .expect("missing metadata for warn_on_quit_with_running_process");
-        let window_width_meta =
-            Self::setting_metadata("window_width").expect("missing metadata for window_width");
-        let window_height_meta =
-            Self::setting_metadata("window_height").expect("missing metadata for window_height");
+        let working_dir_meta = Self::setting_metadata_or_fallback("working_dir");
+        let working_dir_fallback_meta = Self::setting_metadata_or_fallback("working_dir_fallback");
+        let warn_on_quit_meta =
+            Self::setting_metadata_or_fallback("warn_on_quit_with_running_process");
+        let window_width_meta = Self::setting_metadata_or_fallback("window_width");
+        let window_height_meta = Self::setting_metadata_or_fallback("window_height");
+        let config_path_display = self
+            .config_path
+            .as_ref()
+            .map(|path| path.display().to_string())
+            .filter(|path| !path.trim().is_empty())
+            .unwrap_or_else(|| "config path not set".to_string());
 
         div()
             .flex()
@@ -602,7 +615,7 @@ impl SettingsWindow {
                         div()
                             .text_xs()
                             .text_color(text_secondary)
-                            .child("~/.config/termy/config.txt"),
+                            .child(config_path_display),
                     )
                     .child(
                         div()

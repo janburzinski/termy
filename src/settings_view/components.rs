@@ -723,6 +723,19 @@ impl SettingsWindow {
         self.set_background_opacity_preview(drag_start_ratio + delta_ratio)
     }
 
+    pub(super) fn set_background_opacity_from_slider_position(
+        &mut self,
+        pointer_x: f32,
+        slider_width: f32,
+    ) -> Result<bool, String> {
+        let ratio = (pointer_x / slider_width.max(1.0)).clamp(0.0, 1.0);
+        if !self.set_background_opacity_preview(ratio) {
+            return Ok(false);
+        }
+        self.commit_background_opacity()?;
+        Ok(true)
+    }
+
     pub(super) fn finish_background_opacity_drag(&mut self) -> Result<bool, String> {
         let Some((_, start_ratio)) = self.background_opacity_drag_anchor.take() else {
             return Ok(false);
@@ -799,6 +812,10 @@ impl SettingsWindow {
                 cx.listener(move |view, event: &MouseDownEvent, _window, cx| {
                     cx.stop_propagation();
                     let x: f32 = event.position.x.into();
+                    match view.set_background_opacity_from_slider_position(x, slider_width) {
+                        Ok(_) => {}
+                        Err(error) => termy_toast::error(error),
+                    }
                     view.begin_background_opacity_drag(x);
                     cx.notify();
                 }),

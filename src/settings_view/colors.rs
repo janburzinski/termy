@@ -1,4 +1,7 @@
-use super::*;
+use super::{
+    Context, EditableField, IntoElement, ParentElement, SettingsSection, SettingsWindow, Styled,
+    div,
+};
 
 impl SettingsWindow {
     pub(super) fn render_colors_section(&mut self, cx: &mut Context<Self>) -> impl IntoElement {

@@ -1,5 +1,7 @@
 use super::*;
 
+const MAX_FONT_SUGGESTIONS: usize = 200;
+
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub(super) enum EditableField {
     Theme,
@@ -829,7 +831,10 @@ impl SettingsWindow {
                 let next =
                     (self.config.mouse_scroll_multiplier + (delta as f32 * step.delta)).clamp(step.min, step.max);
                 self.config.mouse_scroll_multiplier = next;
-                config::set_root_setting(termy_config_core::RootSettingId::MouseScrollMultiplier, &next.to_string())
+                config::set_root_setting(
+                    termy_config_core::RootSettingId::MouseScrollMultiplier,
+                    &format!("{:.3}", next),
+                )
             }
             EditableField::WindowWidth => {
                 let next = (self.config.window_width + (delta as f32 * step.delta)).clamp(step.min, step.max);
@@ -841,7 +846,7 @@ impl SettingsWindow {
                 self.config.window_height = next;
                 config::set_root_setting(termy_config_core::RootSettingId::WindowHeight, &next.to_string())
             }
-            _ => Ok(()),
+            _ => Err(format!("Unsupported numeric field: {:?}", field)),
         };
 
         if let Err(error) = result {
@@ -912,12 +917,13 @@ impl SettingsWindow {
         // When the dropdown first opens, the input text equals the selected font.
         // Treat that like an empty query so users can browse the full installed list.
         if normalized.is_empty() || normalized == selected_font {
-            return fonts;
+            return fonts.into_iter().take(MAX_FONT_SUGGESTIONS).collect();
         }
 
         fonts
             .into_iter()
             .filter(|font| font.to_ascii_lowercase().contains(&normalized))
+            .take(MAX_FONT_SUGGESTIONS)
             .collect()
     }
 

@@ -62,11 +62,12 @@ impl SettingsWindow {
                     "Background opacity must be a number from 0 to 100".to_string()
                 })?;
                 let opacity = (parsed / 100.0).clamp(0.0, 1.0);
-                self.config.background_opacity = opacity;
                 config::set_root_setting(
                     termy_config_core::RootSettingId::BackgroundOpacity,
                     &format!("{:.3}", opacity),
-                )
+                )?;
+                self.config.background_opacity = opacity;
+                Ok(())
             }
             EditableField::FontFamily => {
                 if value.is_empty() {

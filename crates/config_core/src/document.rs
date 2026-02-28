@@ -149,7 +149,7 @@ pub fn apply_color_updates(contents: &str, updates: &[ColorSettingUpdate]) -> St
             let section = trimmed[1..trimmed.len() - 1].trim().to_ascii_lowercase();
             if section == "colors" {
                 if saw_colors_section {
-                    in_colors = true;
+                    in_colors = false;
                     continue;
                 }
                 saw_colors_section = true;

@@ -1,3 +1,5 @@
+use crate::schema::ROOT_SETTING_ALL_KEYS;
+
 pub(crate) const DEFAULT_TAB_TITLE_FALLBACK: &str = "Terminal";
 pub(crate) const DEFAULT_TAB_TITLE_EXPLICIT_PREFIX: &str = "termy:tab:";
 pub(crate) const DEFAULT_TAB_TITLE_PROMPT_FORMAT: &str = "{cwd}";
@@ -18,4 +20,3 @@ pub const VALID_ROOT_KEYS: &[&str] = ROOT_SETTING_ALL_KEYS;
 pub const VALID_SECTIONS: &[&str] = &["colors", "tab_title"];
 
 pub const SHELL_DECIDE_THEME_ID: &str = "shell-decide";
-use crate::schema::ROOT_SETTING_ALL_KEYS;

@@ -129,7 +129,9 @@ impl AppConfig {
                     }
                 }
                 RootSettingId::WorkingDir => {
-                    if value.is_empty() {
+                    if value.trim().eq_ignore_ascii_case("none") {
+                        config.working_dir = None;
+                    } else if value.is_empty() {
                         push_invalid_value(
                             &mut diagnostics,
                             line_number,
@@ -429,7 +431,9 @@ impl AppConfig {
                     }
                 }
                 RootSettingId::InactiveTabScrollback => {
-                    if let Some(parsed) =
+                    if value.trim().eq_ignore_ascii_case("none") {
+                        config.inactive_tab_scrollback = None;
+                    } else if let Some(parsed) =
                         parse_usize_field(&mut diagnostics, line_number, key, value)
                     {
                         config.inactive_tab_scrollback = Some(parsed.min(MAX_SCROLLBACK_HISTORY));
