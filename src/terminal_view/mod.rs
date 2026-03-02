@@ -2,7 +2,8 @@ use crate::colors::TerminalColors;
 use crate::commands::{self, CommandAction};
 use crate::config::{
     self, AppConfig, CursorStyle as AppCursorStyle, TabCloseVisibility, TabTitleConfig,
-    TabTitleSource, TabWidthMode, TerminalScrollbarStyle, TerminalScrollbarVisibility,
+    PaneFocusEffect, TabTitleSource, TabWidthMode, TerminalScrollbarStyle,
+    TerminalScrollbarVisibility,
 };
 use crate::keybindings;
 use crate::ui::scrollbar::{ScrollbarVisibilityController, ScrollbarVisibilityMode};
@@ -19,13 +20,15 @@ use std::{
     env,
     path::{Path, PathBuf},
     process::{Command, Stdio},
+    sync::Mutex,
     time::{Duration, Instant},
 };
 use termy_search::SearchState;
 use termy_terminal_ui::{
-    CellRenderInfo, TabTitleShellIntegration, Terminal, TerminalCursorStyle, TerminalEvent,
-    TerminalGrid, TerminalRuntimeConfig, TerminalSize,
-    WorkingDirFallback as RuntimeWorkingDirFallback, find_link_in_line, keystroke_to_input,
+    CellRenderInfo, PaneTerminal, TabTitleShellIntegration, Terminal as NativeTerminal,
+    TerminalCursorStyle, TerminalEvent, TerminalGrid, TerminalRuntimeConfig, TerminalSize,
+    TmuxLaunchTarget, WorkingDirFallback as RuntimeWorkingDirFallback, find_link_in_line,
+    keystroke_to_input,
 };
 use termy_toast::ToastManager;
 
@@ -38,6 +41,7 @@ mod command_palette;
 mod inline_input;
 mod interaction;
 mod render;
+mod runtime;
 mod scrollbar;
 mod search;
 mod tab_strip;
@@ -46,8 +50,9 @@ mod titles;
 #[cfg(target_os = "macos")]
 mod update_toasts;
 
-use command_palette::{CommandPaletteMode, CommandPaletteState};
+use command_palette::{CommandPaletteMode, CommandPaletteState, TmuxSessionIntent};
 use inline_input::{InlineInputAlignment, InlineInputState};
+use runtime::{RuntimeKind, RuntimeState, TmuxRuntime};
 pub(crate) use tab_strip::constants::*;
 use tab_strip::state::TabStripState;
 
@@ -63,6 +68,7 @@ const DEFAULT_TAB_TITLE: &str = "Terminal";
 const COMMAND_TITLE_DELAY_MS: u64 = 250;
 const CONFIG_WATCH_INTERVAL_MS: u64 = 750;
 const CURSOR_BLINK_INTERVAL_MS: u64 = 530;
+const TMUX_TITLE_REFRESH_DEBOUNCE_MS: u64 = 120;
 const SELECTION_BG_ALPHA: f32 = 0.35;
 const DIM_TEXT_FACTOR: f32 = 0.66;
 #[cfg(target_os = "macos")]
@@ -95,6 +101,7 @@ const TERMINAL_SCROLLBAR_MUTED_THEME_BLEND: f32 = 0.38;
 const SEARCH_BAR_WIDTH: f32 = 320.0;
 const SEARCH_BAR_HEIGHT: f32 = 36.0;
 const SEARCH_DEBOUNCE_MS: u64 = 50;
+const TMUX_RESIZE_ERROR_TOAST_DEBOUNCE_MS: u64 = 2000;
 const INPUT_SCROLL_SUPPRESS_MS: u64 = 160;
 const TOAST_COPY_FEEDBACK_MS: u64 = 1200;
 const OVERLAY_PANEL_ALPHA_FLOOR_RATIO: f32 = 0.72;
@@ -119,6 +126,10 @@ const SEARCH_COUNTER_TEXT_ALPHA: f32 = 0.60;
 const SEARCH_BUTTON_TEXT_ALPHA: f32 = 0.70;
 const SEARCH_BUTTON_HOVER_BG_ALPHA: f32 = 0.20;
 const SEARCH_INPUT_SELECTION_ALPHA: f32 = 0.30;
+const PANE_FOCUS_ANIMATION_MS: u64 = 140;
+const PANE_FOCUS_ANIMATION_FRAME_MS: u64 = 16;
+const PANE_FOCUS_ANIMATION_DURATION: Duration = Duration::from_millis(PANE_FOCUS_ANIMATION_MS);
+const MAX_PANE_FOCUS_STRENGTH: f32 = 2.0;
 
 type TabId = u64;
 
@@ -139,6 +150,30 @@ pub(super) struct TerminalViewportGeometry {
 #[derive(Clone, Copy, Debug)]
 struct TerminalScrollbarDragState {
     thumb_grab_offset: f32,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum PaneResizeAxis {
+    Horizontal,
+    Vertical,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum PaneResizeEdge {
+    Left,
+    Right,
+    Top,
+    Bottom,
+}
+
+#[derive(Clone, Debug)]
+struct PaneResizeDragState {
+    pane_id: String,
+    axis: PaneResizeAxis,
+    edge: PaneResizeEdge,
+    start_x: f32,
+    start_y: f32,
+    applied_steps: i32,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -169,9 +204,235 @@ impl TerminalScrollbarMarkerCache {
     }
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct PaneFocusTarget {
+    tab_id: TabId,
+    pane_id: String,
+}
+
+#[derive(Clone, Debug)]
+struct PaneFocusTransition {
+    tab_id: TabId,
+    from_pane_id: String,
+    to_pane_id: String,
+    started_at: Instant,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct PaneFocusPreset {
+    inactive_fg_blend: f32,
+    inactive_bg_blend: f32,
+    inactive_desaturate: f32,
+    active_border_alpha: f32,
+}
+
+enum Terminal {
+    Tmux(PaneTerminal),
+    Native(Mutex<NativeTerminal>),
+}
+
+impl Terminal {
+    fn new_tmux(size: TerminalSize, scrollback_history: usize) -> Self {
+        Self::Tmux(PaneTerminal::new(size, scrollback_history))
+    }
+
+    fn new_native(
+        size: TerminalSize,
+        configured_working_dir: Option<&str>,
+        event_wakeup_tx: Option<Sender<()>>,
+        tab_title_shell_integration: Option<&TabTitleShellIntegration>,
+        runtime_config: Option<&TerminalRuntimeConfig>,
+    ) -> anyhow::Result<Self> {
+        Ok(Self::Native(Mutex::new(NativeTerminal::new(
+            size,
+            configured_working_dir,
+            event_wakeup_tx,
+            tab_title_shell_integration,
+            runtime_config,
+        )?)))
+    }
+
+    fn feed_output(&self, bytes: &[u8]) {
+        if let Self::Tmux(terminal) = self {
+            terminal.feed_output(bytes);
+        }
+    }
+
+    fn write_input(&self, input: &[u8]) {
+        if let Self::Native(terminal) = self {
+            if let Ok(terminal) = terminal.lock() {
+                terminal.write(input);
+            }
+        }
+    }
+
+    fn process_events(&self) -> Vec<TerminalEvent> {
+        match self {
+            Self::Tmux(_) => Vec::new(),
+            Self::Native(terminal) => terminal
+                .lock()
+                .map(|terminal| terminal.process_events())
+                .unwrap_or_default(),
+        }
+    }
+
+    fn resize(&self, new_size: TerminalSize) {
+        match self {
+            Self::Tmux(terminal) => terminal.resize(new_size),
+            Self::Native(terminal) => {
+                if let Ok(mut terminal) = terminal.lock() {
+                    terminal.resize(new_size);
+                }
+            }
+        }
+    }
+
+    fn size(&self) -> TerminalSize {
+        match self {
+            Self::Tmux(terminal) => terminal.size(),
+            Self::Native(terminal) => terminal
+                .lock()
+                .map(|terminal| terminal.size())
+                .unwrap_or_default(),
+        }
+    }
+
+    fn scroll_display(&self, delta_lines: i32) -> bool {
+        match self {
+            Self::Tmux(terminal) => terminal.scroll_display(delta_lines),
+            Self::Native(terminal) => terminal
+                .lock()
+                .map(|terminal| terminal.scroll_display(delta_lines))
+                .unwrap_or(false),
+        }
+    }
+
+    fn scroll_to_bottom(&self) -> bool {
+        match self {
+            Self::Tmux(terminal) => terminal.scroll_to_bottom(),
+            Self::Native(terminal) => terminal
+                .lock()
+                .map(|terminal| terminal.scroll_to_bottom())
+                .unwrap_or(false),
+        }
+    }
+
+    fn scroll_state(&self) -> (usize, usize) {
+        match self {
+            Self::Tmux(terminal) => terminal.scroll_state(),
+            Self::Native(terminal) => terminal
+                .lock()
+                .map(|terminal| terminal.scroll_state())
+                .unwrap_or((0, 0)),
+        }
+    }
+
+    fn cursor_position(&self) -> (usize, usize) {
+        match self {
+            Self::Tmux(terminal) => terminal.cursor_position(),
+            Self::Native(terminal) => terminal
+                .lock()
+                .map(|terminal| terminal.cursor_position())
+                .unwrap_or((0, 0)),
+        }
+    }
+
+    fn set_scrollback_history(&self, history_size: usize) {
+        match self {
+            Self::Tmux(terminal) => terminal.set_scrollback_history(history_size),
+            Self::Native(terminal) => {
+                if let Ok(terminal) = terminal.lock() {
+                    terminal.set_scrollback_history(history_size);
+                }
+            }
+        }
+    }
+
+    fn bracketed_paste_mode(&self) -> bool {
+        match self {
+            Self::Tmux(terminal) => terminal.bracketed_paste_mode(),
+            Self::Native(terminal) => terminal
+                .lock()
+                .map(|terminal| terminal.bracketed_paste_mode())
+                .unwrap_or(false),
+        }
+    }
+
+    fn alternate_screen_mode(&self) -> bool {
+        match self {
+            Self::Tmux(terminal) => terminal.alternate_screen_mode(),
+            Self::Native(terminal) => terminal
+                .lock()
+                .map(|terminal| terminal.alternate_screen_mode())
+                .unwrap_or(false),
+        }
+    }
+
+    fn with_grid<R>(
+        &self,
+        f: impl FnOnce(&alacritty_terminal::grid::Grid<alacritty_terminal::term::cell::Cell>) -> R,
+    ) -> Option<R> {
+        match self {
+            Self::Tmux(terminal) => Some(terminal.with_term(|term| f(term.grid()))),
+            Self::Native(terminal) => {
+                if let Ok(terminal) = terminal.lock() {
+                    Some(terminal.with_term(|term| f(term.grid())))
+                } else {
+                    None
+                }
+            }
+        }
+    }
+
+    fn for_each_renderable_cell(
+        &self,
+        mut visitor: impl FnMut(usize, i32, usize, &alacritty_terminal::term::cell::Cell),
+    ) -> Option<usize> {
+        macro_rules! visit_term_cells {
+            ($term:expr) => {{
+                let content = $term.renderable_content();
+                let display_offset = content.display_offset;
+                for cell in content.display_iter {
+                    visitor(
+                        display_offset,
+                        cell.point.line.0,
+                        cell.point.column.0,
+                        cell.cell,
+                    );
+                }
+                display_offset
+            }};
+        }
+
+        match self {
+            Self::Tmux(terminal) => Some(terminal.with_term(|term| visit_term_cells!(term))),
+            Self::Native(terminal) => {
+                if let Ok(terminal) = terminal.lock() {
+                    Some(terminal.with_term(|term| visit_term_cells!(term)))
+                } else {
+                    None
+                }
+            }
+        }
+    }
+}
+
+struct TerminalPane {
+    id: String,
+    left: u16,
+    top: u16,
+    width: u16,
+    height: u16,
+    degraded: bool,
+    terminal: Terminal,
+}
+
 struct TerminalTab {
     id: TabId,
-    terminal: Terminal,
+    window_id: String,
+    window_index: i32,
+    panes: Vec<TerminalPane>,
+    active_pane_id: String,
     manual_title: Option<String>,
     explicit_title: Option<String>,
     shell_title: Option<String>,
@@ -183,35 +444,24 @@ struct TerminalTab {
     display_width: f32,
     running_process: bool,
 }
-
 impl TerminalTab {
-    fn new(id: TabId, terminal: Terminal, predicted_prompt_title: Option<String>) -> Self {
-        let title = predicted_prompt_title
-            .as_deref()
-            .unwrap_or(DEFAULT_TAB_TITLE)
-            .to_string();
-        let title_text_width = 0.0;
-        let sticky_title_width = TerminalView::tab_display_width_for_text_px_without_close_with_max(
-            title_text_width,
-            TAB_MAX_WIDTH,
-        );
-        let display_width =
-            TerminalView::tab_display_width_for_text_px_with_max(title_text_width, TAB_MAX_WIDTH);
+    fn active_pane_index(&self) -> Option<usize> {
+        self.panes
+            .iter()
+            .position(|pane| pane.id == self.active_pane_id)
+            .or_else(|| (!self.panes.is_empty()).then_some(0))
+    }
 
-        Self {
-            id,
-            terminal,
-            manual_title: None,
-            explicit_title: predicted_prompt_title,
-            shell_title: None,
-            pending_command_title: None,
-            pending_command_token: 0,
-            title,
-            title_text_width,
-            sticky_title_width,
-            display_width,
-            running_process: false,
-        }
+    fn active_terminal(&self) -> Option<&Terminal> {
+        self.active_pane_index()
+            .and_then(|index| self.panes.get(index))
+            .map(|pane| &pane.terminal)
+    }
+
+    fn active_pane_id(&self) -> Option<&str> {
+        self.active_pane_index()
+            .and_then(|index| self.panes.get(index))
+            .map(|pane| pane.id.as_str())
     }
 }
 
@@ -393,6 +643,44 @@ fn resolve_chrome_stroke_color(
     }
 }
 
+fn pane_divider_color(chrome_background: gpui::Rgba, foreground: gpui::Rgba) -> gpui::Rgba {
+    resolve_chrome_stroke_color(chrome_background, foreground, TAB_STROKE_FOREGROUND_MIX)
+}
+
+fn pane_focus_strength_factor(pane_focus_strength: f32) -> f32 {
+    pane_focus_strength.clamp(0.0, MAX_PANE_FOCUS_STRENGTH)
+}
+
+fn pane_focus_preset(effect: PaneFocusEffect) -> Option<PaneFocusPreset> {
+    match effect {
+        PaneFocusEffect::Off => None,
+        PaneFocusEffect::SoftSpotlight => Some(PaneFocusPreset {
+            inactive_fg_blend: 0.36,
+            inactive_bg_blend: 0.12,
+            inactive_desaturate: 0.0,
+            active_border_alpha: 0.38,
+        }),
+        PaneFocusEffect::Cinematic => Some(PaneFocusPreset {
+            inactive_fg_blend: 0.52,
+            inactive_bg_blend: 0.18,
+            inactive_desaturate: 0.34,
+            active_border_alpha: 0.46,
+        }),
+        PaneFocusEffect::Minimal => Some(PaneFocusPreset {
+            inactive_fg_blend: 0.22,
+            inactive_bg_blend: 0.08,
+            inactive_desaturate: 0.0,
+            active_border_alpha: 0.28,
+        }),
+    }
+}
+
+fn pane_focus_ease_out(t: f32) -> f32 {
+    let clamped = t.clamp(0.0, 1.0);
+    let inv = 1.0 - clamped;
+    1.0 - (inv * inv * inv)
+}
+
 #[derive(Clone, Copy)]
 struct OverlayStyleBuilder<'a> {
     colors: &'a TerminalColors,
@@ -481,9 +769,13 @@ pub struct TerminalView {
     tab_shell_integration: TabTitleShellIntegration,
     configured_working_dir: Option<String>,
     terminal_runtime: TerminalRuntimeConfig,
+    runtime: RuntimeState,
+    tmux_enabled_config: bool,
+    tmux_show_active_pane_border: bool,
     config_path: Option<PathBuf>,
     config_fingerprint: Option<u64>,
     last_config_error_message: Option<String>,
+    cached_tmux_binary: Option<String>,
     font_family: SharedString,
     base_font_size: f32,
     font_size: Pixels,
@@ -498,6 +790,11 @@ pub struct TerminalView {
     padding_x: f32,
     padding_y: f32,
     mouse_scroll_multiplier: f32,
+    pane_focus_effect: PaneFocusEffect,
+    pane_focus_strength: f32,
+    pane_focus_last_target: Option<PaneFocusTarget>,
+    pane_focus_transition: Option<PaneFocusTransition>,
+    pane_focus_animation_scheduled: bool,
     line_height: f32,
     selection_anchor: Option<CellPos>,
     selection_head: Option<CellPos>,
@@ -514,11 +811,13 @@ pub struct TerminalView {
     inline_input_selecting: bool,
     terminal_scroll_accumulator_y: f32,
     input_scroll_suppress_until: Option<Instant>,
+    last_tmux_resize_error_at: Option<Instant>,
     terminal_scrollbar_visibility: TerminalScrollbarVisibility,
     terminal_scrollbar_style: TerminalScrollbarStyle,
     terminal_scrollbar_visibility_controller: ScrollbarVisibilityController,
     terminal_scrollbar_animation_active: bool,
     terminal_scrollbar_drag: Option<TerminalScrollbarDragState>,
+    pane_resize_drag: Option<PaneResizeDragState>,
     terminal_scrollbar_marker_cache: TerminalScrollbarMarkerCache,
     /// Cached cell dimensions
     cell_size: Option<Size<Pixels>>,
@@ -586,6 +885,11 @@ impl TerminalView {
         }
     }
 
+    #[cfg(test)]
+    fn uses_event_driven_tmux_wakeup() -> bool {
+        true
+    }
+
     fn user_home_dir() -> Option<PathBuf> {
         dirs::home_dir()
     }
@@ -647,6 +951,100 @@ impl TerminalView {
         Some(Self::display_working_directory_for_prompt(&path))
     }
 
+    fn runtime_kind(&self) -> RuntimeKind {
+        self.runtime.kind()
+    }
+
+    fn runtime_uses_tmux(&self) -> bool {
+        self.runtime_kind().uses_tmux()
+    }
+
+    fn tmux_runtime(&self) -> &TmuxRuntime {
+        self.runtime
+            .as_tmux()
+            .expect("tmux runtime must exist while tmux backend is active")
+    }
+
+    fn tmux_runtime_mut(&mut self) -> &mut TmuxRuntime {
+        self.runtime
+            .as_tmux_mut()
+            .expect("tmux runtime must exist while tmux backend is active")
+    }
+
+    fn create_native_tab(
+        tab_id: TabId,
+        terminal: Terminal,
+        cols: u16,
+        rows: u16,
+        predicted_prompt_title: Option<String>,
+    ) -> TerminalTab {
+        let title = predicted_prompt_title
+            .as_deref()
+            .unwrap_or(DEFAULT_TAB_TITLE)
+            .to_string();
+        let title_text_width = 0.0;
+        let sticky_title_width =
+            Self::tab_display_width_for_text_px_without_close_with_max(title_text_width, TAB_MAX_WIDTH);
+        let display_width =
+            Self::tab_display_width_for_text_px_with_max(title_text_width, TAB_MAX_WIDTH);
+        let pane_id = format!("%native-{tab_id}");
+        let pane = TerminalPane {
+            id: pane_id.clone(),
+            left: 0,
+            top: 0,
+            width: cols.max(1),
+            height: rows.max(1),
+            degraded: false,
+            terminal,
+        };
+        TerminalTab {
+            id: tab_id,
+            window_id: format!("@native-{tab_id}"),
+            window_index: 0,
+            panes: vec![pane],
+            active_pane_id: pane_id,
+            manual_title: None,
+            explicit_title: predicted_prompt_title,
+            shell_title: None,
+            pending_command_title: None,
+            pending_command_token: 0,
+            title,
+            title_text_width,
+            sticky_title_width,
+            display_width,
+            running_process: false,
+        }
+    }
+
+    fn pane_terminal_by_id(&self, pane_id: &str) -> Option<&Terminal> {
+        self.tabs
+            .iter()
+            .flat_map(|tab| tab.panes.iter())
+            .find(|pane| pane.id == pane_id)
+            .map(|pane| &pane.terminal)
+    }
+
+    fn is_active_pane_id(&self, pane_id: &str) -> bool {
+        self.tabs
+            .get(self.active_tab)
+            .and_then(|tab| tab.active_pane_id())
+            == Some(pane_id)
+    }
+
+    fn active_pane_id(&self) -> Option<&str> {
+        self.tabs.get(self.active_tab).and_then(|tab| tab.active_pane_id())
+    }
+
+    fn active_tab_ref(&self) -> Option<&TerminalTab> {
+        self.tabs.get(self.active_tab)
+    }
+
+    fn active_pane_ref(&self) -> Option<&TerminalPane> {
+        let tab = self.active_tab_ref()?;
+        let index = tab.active_pane_index()?;
+        tab.panes.get(index)
+    }
+
     fn background_opacity_factor(&self) -> f32 {
         background_opacity_factor(self.background_opacity)
     }
@@ -659,8 +1057,111 @@ impl TerminalView {
         scaled_chrome_alpha_for_opacity(base_alpha, self.background_opacity)
     }
 
+    fn pane_focus_config(&self) -> Option<(PaneFocusPreset, f32)> {
+        let preset = pane_focus_preset(self.pane_focus_effect)?;
+        let strength = pane_focus_strength_factor(self.pane_focus_strength);
+        (strength > f32::EPSILON).then_some((preset, strength))
+    }
+
+    fn update_pane_focus_target(
+        &mut self,
+        tab_id: Option<TabId>,
+        pane_count: usize,
+        active_pane_id: Option<&str>,
+        now: Instant,
+    ) {
+        let Some(tab_id) = tab_id else {
+            self.pane_focus_last_target = None;
+            self.pane_focus_transition = None;
+            return;
+        };
+        let Some(active_pane_id) = active_pane_id else {
+            self.pane_focus_last_target = None;
+            self.pane_focus_transition = None;
+            return;
+        };
+
+        let next = PaneFocusTarget {
+            tab_id,
+            pane_id: active_pane_id.to_string(),
+        };
+
+        if pane_count <= 1 {
+            self.pane_focus_last_target = Some(next);
+            self.pane_focus_transition = None;
+            return;
+        }
+
+        match &self.pane_focus_last_target {
+            None => {
+                self.pane_focus_last_target = Some(next);
+                self.pane_focus_transition = None;
+            }
+            Some(previous) if previous == &next => {}
+            Some(previous) if previous.tab_id != next.tab_id => {
+                self.pane_focus_last_target = Some(next);
+                self.pane_focus_transition = None;
+            }
+            Some(previous) => {
+                self.pane_focus_transition = Some(PaneFocusTransition {
+                    tab_id: next.tab_id,
+                    from_pane_id: previous.pane_id.clone(),
+                    to_pane_id: next.pane_id.clone(),
+                    started_at: now,
+                });
+                self.pane_focus_last_target = Some(next);
+            }
+        }
+    }
+
+    fn pane_focus_transition_snapshot(
+        &mut self,
+        active_tab_id: Option<TabId>,
+        now: Instant,
+    ) -> Option<(String, String, f32)> {
+        let transition = self.pane_focus_transition.as_ref()?;
+        if active_tab_id != Some(transition.tab_id) {
+            self.pane_focus_transition = None;
+            return None;
+        }
+
+        let elapsed = now.saturating_duration_since(transition.started_at);
+        if elapsed >= PANE_FOCUS_ANIMATION_DURATION {
+            self.pane_focus_transition = None;
+            return None;
+        }
+        let progress =
+            pane_focus_ease_out(elapsed.as_secs_f32() / PANE_FOCUS_ANIMATION_DURATION.as_secs_f32());
+        Some((
+            transition.from_pane_id.clone(),
+            transition.to_pane_id.clone(),
+            progress,
+        ))
+    }
+
+    fn schedule_pane_focus_animation(&mut self, cx: &mut Context<Self>) {
+        if self.pane_focus_animation_scheduled || self.pane_focus_transition.is_none() {
+            return;
+        }
+
+        self.pane_focus_animation_scheduled = true;
+        cx.spawn(async move |this: WeakEntity<Self>, cx: &mut AsyncApp| {
+            smol::Timer::after(Duration::from_millis(PANE_FOCUS_ANIMATION_FRAME_MS)).await;
+            let _ = cx.update(|cx| {
+                this.update(cx, |view, cx| {
+                    view.pane_focus_animation_scheduled = false;
+                    cx.notify();
+                })
+            });
+        })
+        .detach();
+    }
+
     fn effective_terminal_padding(&self) -> (f32, f32) {
-        if self.active_terminal().alternate_screen_mode() {
+        if self
+            .active_terminal()
+            .is_some_and(|terminal| terminal.alternate_screen_mode())
+        {
             (0.0, 0.0)
         } else {
             (self.padding_x, self.padding_y)
@@ -708,14 +1209,15 @@ impl TerminalView {
         &self,
         track_height: f32,
     ) -> Option<scrollbar::TerminalScrollbarLayout> {
-        let size = self.active_terminal().size();
+        let terminal = self.active_terminal()?;
+        let size = terminal.size();
         let viewport_rows = size.rows as usize;
         if viewport_rows == 0 {
             return None;
         }
 
         let line_height: f32 = size.cell_height.into();
-        let (display_offset, history_size) = self.active_terminal().scroll_state();
+        let (display_offset, history_size) = terminal.scroll_state();
         scrollbar::compute_layout(
             display_offset,
             history_size,
@@ -727,7 +1229,8 @@ impl TerminalView {
     }
 
     pub(super) fn terminal_viewport_geometry(&self) -> Option<TerminalViewportGeometry> {
-        let size = self.active_terminal().size();
+        let pane = self.active_pane_ref()?;
+        let size = pane.terminal.size();
         if size.cols == 0 || size.rows == 0 {
             return None;
         }
@@ -740,8 +1243,8 @@ impl TerminalView {
         }
 
         Some(TerminalViewportGeometry {
-            origin_x: padding_x,
-            origin_y: self.chrome_height() + padding_y,
+            origin_x: padding_x + (f32::from(pane.left) * cell_width),
+            origin_y: padding_y + (f32::from(pane.top) * cell_height),
             width: cell_width * f32::from(size.cols),
             height: cell_height * f32::from(size.rows),
         })
@@ -749,22 +1252,9 @@ impl TerminalView {
 
     pub(super) fn terminal_surface_geometry(
         &self,
-        window: &Window,
+        _window: &Window,
     ) -> Option<TerminalViewportGeometry> {
-        let viewport = window.viewport_size();
-        let width: f32 = viewport.width.into();
-        let viewport_height: f32 = viewport.height.into();
-        let height = (viewport_height - self.chrome_height()).max(0.0);
-        if width <= f32::EPSILON || height <= f32::EPSILON {
-            return None;
-        }
-
-        Some(TerminalViewportGeometry {
-            origin_x: 0.0,
-            origin_y: self.chrome_height(),
-            width,
-            height,
-        })
+        self.terminal_viewport_geometry()
     }
 
     pub(super) fn clear_terminal_scrollbar_marker_cache(&mut self) {
@@ -876,7 +1366,7 @@ impl TerminalView {
         // Focus the terminal immediately
         focus_handle.focus(window, cx);
 
-        // Process terminal events only when terminals signal activity.
+        // Process terminal events only when runtimes signal activity.
         cx.spawn(async move |this: WeakEntity<Self>, cx: &mut AsyncApp| {
             while event_wakeup_rx.recv_async().await.is_ok() {
                 while event_wakeup_rx.try_recv().is_ok() {}
@@ -921,7 +1411,10 @@ impl TerminalView {
                         let availability_changed = view.refresh_install_cli_availability();
                         if availability_changed {
                             view.refresh_command_palette_items_for_current_mode(cx);
-                            cx.set_menus(crate::menus::app_menus(view.install_cli_available()));
+                            cx.set_menus(crate::menus::app_menus(
+                                view.install_cli_available(),
+                                view.runtime_uses_tmux(),
+                            ));
                         }
                         if config_changed || availability_changed {
                             cx.notify();
@@ -985,18 +1478,21 @@ impl TerminalView {
         );
         let startup_predicted_title =
             Self::predicted_prompt_seed_title(&tab_title, predicted_prompt_cwd.as_deref());
-        let terminal = Terminal::new(
-            TerminalSize::default(),
+        let initial_cols = TerminalSize::default().cols;
+        let initial_rows = TerminalSize::default().rows;
+        let (runtime, initial_snapshot, native_terminal) = Self::runtime_startup_from_app_config(
+            &config,
+            &event_wakeup_tx,
             configured_working_dir.as_deref(),
-            Some(event_wakeup_tx.clone()),
-            Some(&tab_shell_integration),
-            Some(&terminal_runtime),
-        )
-        .expect("Failed to create terminal");
+            &tab_shell_integration,
+            &terminal_runtime,
+            initial_cols,
+            initial_rows,
+        );
 
         let mut view = Self {
-            tabs: vec![TerminalTab::new(1, terminal, startup_predicted_title)],
-            next_tab_id: 2,
+            tabs: Vec::new(),
+            next_tab_id: 1,
             active_tab: 0,
             renaming_tab: None,
             rename_input: InlineInputState::new(String::new()),
@@ -1013,9 +1509,16 @@ impl TerminalView {
             tab_shell_integration,
             configured_working_dir,
             terminal_runtime,
+            runtime,
+            tmux_enabled_config: config.tmux_enabled,
+            tmux_show_active_pane_border: config.tmux_show_active_pane_border,
             config_path,
             config_fingerprint,
             last_config_error_message,
+            cached_tmux_binary: {
+                let binary = config.tmux_binary.trim().to_string();
+                (!binary.is_empty()).then_some(binary)
+            },
             font_family: config.font_family.into(),
             base_font_size,
             font_size: px(base_font_size),
@@ -1030,6 +1533,11 @@ impl TerminalView {
             padding_x,
             padding_y,
             mouse_scroll_multiplier: config.mouse_scroll_multiplier,
+            pane_focus_effect: config.pane_focus_effect,
+            pane_focus_strength: config.pane_focus_strength,
+            pane_focus_last_target: None,
+            pane_focus_transition: None,
+            pane_focus_animation_scheduled: false,
             line_height: 1.4,
             selection_anchor: None,
             selection_head: None,
@@ -1046,11 +1554,13 @@ impl TerminalView {
             inline_input_selecting: false,
             terminal_scroll_accumulator_y: 0.0,
             input_scroll_suppress_until: None,
+            last_tmux_resize_error_at: None,
             terminal_scrollbar_visibility: config.terminal_scrollbar_visibility,
             terminal_scrollbar_style: config.terminal_scrollbar_style,
             terminal_scrollbar_visibility_controller: ScrollbarVisibilityController::default(),
             terminal_scrollbar_animation_active: false,
             terminal_scrollbar_drag: None,
+            pane_resize_drag: None,
             terminal_scrollbar_marker_cache: TerminalScrollbarMarkerCache::default(),
             cell_size: None,
             search_open: false,
@@ -1069,7 +1579,24 @@ impl TerminalView {
             #[cfg(target_os = "macos")]
             update_check_toast_id: None,
         };
-        view.refresh_tab_title(0);
+        match initial_snapshot {
+            Some(initial_snapshot) => view.apply_tmux_snapshot(initial_snapshot),
+            None => {
+                if let Some(native_terminal) = native_terminal {
+                    let tab_id = view.allocate_tab_id();
+                    view.tabs = vec![Self::create_native_tab(
+                        tab_id,
+                        native_terminal,
+                        initial_cols,
+                        initial_rows,
+                        startup_predicted_title.clone(),
+                    )];
+                    view.active_tab = 0;
+                    view.refresh_tab_title(0);
+                    view.mark_tab_strip_layout_dirty();
+                }
+            }
+        }
 
         #[cfg(target_os = "macos")]
         {
@@ -1088,7 +1615,11 @@ impl TerminalView {
     }
 
     fn apply_runtime_config(&mut self, config: AppConfig, cx: &mut Context<Self>) -> bool {
-        keybindings::install_keybindings(cx, &config);
+        keybindings::install_keybindings(cx, &config, self.runtime_uses_tmux());
+        self.cached_tmux_binary = {
+            let binary = config.tmux_binary.trim().to_string();
+            (!binary.is_empty()).then_some(binary)
+        };
         let previous_font_family = self.font_family.clone();
         let previous_font_size = self.font_size;
         self.theme_id = config.theme.clone();
@@ -1107,8 +1638,26 @@ impl TerminalView {
             enabled: self.tab_title.shell_integration,
             explicit_prefix: self.tab_title.explicit_prefix.clone(),
         };
+        let next_runtime_kind = Self::runtime_kind_from_app_config(&config);
+        let tmux_enabled_changed = config.tmux_enabled != self.tmux_enabled_config;
+        if next_runtime_kind != self.runtime_kind() && tmux_enabled_changed {
+            termy_toast::info(
+                "tmux startup default saved. Use Tmux Sessions to switch runtime now.",
+            );
+        }
+        self.tmux_enabled_config = config.tmux_enabled;
+        self.tmux_show_active_pane_border = config.tmux_show_active_pane_border;
         self.configured_working_dir = config.working_dir.clone();
         self.terminal_runtime = Self::runtime_config_from_app_config(&config);
+        let reconnect_managed_tmux = self.runtime_uses_tmux()
+            && matches!(self.tmux_runtime().config.launch, TmuxLaunchTarget::Managed { .. });
+        if reconnect_managed_tmux {
+            self.reconnect_tmux_runtime(Self::tmux_runtime_from_app_config(&config));
+        } else if self.runtime_uses_tmux() {
+            // Session-attached runtime keeps its explicit launch target across config reloads.
+            // Only update the binary path used for external tmux command invocations.
+            self.tmux_runtime_mut().config.binary = config.tmux_binary.trim().to_string();
+        }
         self.font_family = config.font_family.into();
         self.base_font_size = config.font_size.clamp(MIN_FONT_SIZE, MAX_FONT_SIZE);
         self.font_size = px(self.base_font_size);
@@ -1125,6 +1674,15 @@ impl TerminalView {
         self.padding_x = config.padding_x.max(0.0);
         self.padding_y = config.padding_y.max(0.0);
         self.mouse_scroll_multiplier = config.mouse_scroll_multiplier;
+        if self.pane_focus_effect != config.pane_focus_effect
+            || (self.pane_focus_strength - config.pane_focus_strength).abs() > f32::EPSILON
+        {
+            self.pane_focus_last_target = None;
+            self.pane_focus_transition = None;
+            self.pane_focus_animation_scheduled = false;
+        }
+        self.pane_focus_effect = config.pane_focus_effect;
+        self.pane_focus_strength = config.pane_focus_strength;
         if self.terminal_scrollbar_visibility != config.terminal_scrollbar_visibility {
             self.terminal_scrollbar_visibility = config.terminal_scrollbar_visibility;
             self.terminal_scrollbar_visibility_controller.reset();
@@ -1134,6 +1692,19 @@ impl TerminalView {
         }
         self.terminal_scrollbar_style = config.terminal_scrollbar_style;
         self.set_command_palette_show_keybinds(config.command_palette_show_keybinds);
+        let inactive_history = self
+            .inactive_tab_scrollback
+            .unwrap_or(self.terminal_runtime.scrollback_history);
+        for (tab_index, tab) in self.tabs.iter().enumerate() {
+            let history = if tab_index == self.active_tab {
+                self.terminal_runtime.scrollback_history
+            } else {
+                inactive_history
+            };
+            for pane in &tab.panes {
+                pane.terminal.set_scrollback_history(history);
+            }
+        }
 
         for index in 0..self.tabs.len() {
             self.refresh_tab_title(index);
@@ -1251,11 +1822,22 @@ impl TerminalView {
     }
 
     fn process_terminal_events(&mut self, cx: &mut Context<Self>) -> bool {
+        if self.runtime_uses_tmux() {
+            self.process_tmux_terminal_events(cx)
+        } else {
+            self.process_native_terminal_events(cx)
+        }
+    }
+
+    fn process_native_terminal_events(&mut self, cx: &mut Context<Self>) -> bool {
         let mut should_redraw = false;
         let active_tab = self.active_tab;
 
         for index in 0..self.tabs.len() {
-            let events = self.tabs[index].terminal.process_events();
+            let Some(terminal) = self.tabs[index].active_terminal() else {
+                continue;
+            };
+            let events = terminal.process_events();
             for event in events {
                 match event {
                     TerminalEvent::Wakeup | TerminalEvent::Bell | TerminalEvent::Exit => {
@@ -1301,8 +1883,10 @@ impl TerminalView {
         }
     }
 
-    fn active_terminal(&self) -> &Terminal {
-        &self.tabs[self.active_tab].terminal
+    fn active_terminal(&self) -> Option<&Terminal> {
+        self.tabs
+            .get(self.active_tab)
+            .and_then(TerminalTab::active_terminal)
     }
 }
 
@@ -1406,6 +1990,65 @@ mod tests {
     }
 
     #[test]
+    fn pane_divider_color_matches_shared_chrome_stroke_resolution() {
+        let chrome_surface_bg = gpui::Rgba {
+            r: 0.04,
+            g: 0.08,
+            b: 0.13,
+            a: 0.94,
+        };
+        let foreground = gpui::Rgba {
+            r: 0.82,
+            g: 0.88,
+            b: 0.93,
+            a: 1.0,
+        };
+
+        assert_eq!(
+            pane_divider_color(chrome_surface_bg, foreground),
+            resolve_chrome_stroke_color(chrome_surface_bg, foreground, TAB_STROKE_FOREGROUND_MIX)
+        );
+    }
+
+    #[test]
+    fn pane_focus_preset_is_disabled_for_off() {
+        assert!(pane_focus_preset(PaneFocusEffect::Off).is_none());
+    }
+
+    #[test]
+    fn pane_focus_preset_strength_scales_monotonically() {
+        let preset = pane_focus_preset(PaneFocusEffect::SoftSpotlight)
+            .expect("soft spotlight preset should exist");
+        let low_strength = pane_focus_strength_factor(0.2);
+        let high_strength = pane_focus_strength_factor(0.8);
+
+        assert!(
+            (preset.inactive_fg_blend * high_strength)
+                > (preset.inactive_fg_blend * low_strength)
+        );
+        assert!(
+            (preset.inactive_bg_blend * high_strength)
+                > (preset.inactive_bg_blend * low_strength)
+        );
+        assert!(
+            (preset.active_border_alpha * high_strength)
+                > (preset.active_border_alpha * low_strength)
+        );
+    }
+
+    #[test]
+    fn pane_focus_strength_factor_clamps_to_extended_upper_bound() {
+        assert_eq!(pane_focus_strength_factor(2.5), MAX_PANE_FOCUS_STRENGTH);
+    }
+
+    #[test]
+    fn pane_focus_ease_out_matches_endpoint_expectations() {
+        assert_eq!(pane_focus_ease_out(0.0), 0.0);
+        assert_eq!(pane_focus_ease_out(1.0), 1.0);
+        assert!(pane_focus_ease_out(0.5) > 0.5);
+    }
+
+    #[test]
     fn install_cli_availability_is_inverse_of_installed_probe() {
         assert!(TerminalView::install_cli_availability_from_probe(false));
         assert!(!TerminalView::install_cli_availability_from_probe(true));
@@ -1422,5 +2065,44 @@ mod tests {
             TerminalView::refreshed_install_cli_availability(false, true);
         assert!(!next_available);
         assert!(!changed);
+    }
+
+    #[test]
+    fn runtime_kind_follows_tmux_enabled_flag() {
+        let mut config = AppConfig::default();
+        config.tmux_enabled = false;
+        assert_eq!(
+            TerminalView::runtime_kind_from_app_config(&config),
+            RuntimeKind::Native
+        );
+
+        config.tmux_enabled = true;
+        assert_eq!(
+            TerminalView::runtime_kind_from_app_config(&config),
+            RuntimeKind::Tmux
+        );
+    }
+
+    #[test]
+    fn tmux_runtime_uses_event_driven_wakeup_strategy() {
+        assert!(TerminalView::uses_event_driven_tmux_wakeup());
+    }
+
+    #[test]
+    fn create_native_tab_starts_with_one_full_size_pane() {
+        let terminal = Terminal::new_tmux(TerminalSize::default(), 2000);
+        let tab = TerminalView::create_native_tab(7, terminal, 120, 42, None);
+
+        assert_eq!(tab.panes.len(), 1);
+        assert_eq!(tab.window_id, "@native-7");
+        assert_eq!(tab.window_index, 0);
+        assert_eq!(tab.active_pane_id, "%native-7");
+
+        let pane = &tab.panes[0];
+        assert_eq!(pane.id, "%native-7");
+        assert_eq!(pane.left, 0);
+        assert_eq!(pane.top, 0);
+        assert_eq!(pane.width, 120);
+        assert_eq!(pane.height, 42);
     }
 }

@@ -4,17 +4,22 @@ use state::{
     command_palette_next_scroll_y, command_palette_target_scroll_y,
     ordered_theme_ids_for_palette, CommandPaletteItem, CommandPaletteItemKind,
 };
+use termy_command_core::{CommandAvailability, CommandCapabilities, CommandUnavailableReason};
 
 mod render;
 mod state;
+mod state_tmux;
 mod style;
+mod tmux_sessions;
 
 pub(super) use state::{CommandPaletteMode, CommandPaletteState};
+pub(super) use state_tmux::TmuxSessionIntent;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum CommandPaletteEscapeAction {
     ClosePalette,
     BackToCommands,
+    BackToTmuxRenameSelect,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -73,23 +78,23 @@ impl TerminalView {
         shortcut
     }
 
-    fn command_palette_action_available_for_state(
+    fn command_palette_action_availability_for_state(
         action: CommandAction,
         install_cli_available: bool,
-    ) -> bool {
-        match action {
-            CommandAction::InstallCli => install_cli_available,
-            _ => true,
-        }
+        tmux_enabled: bool,
+    ) -> CommandAvailability {
+        action.availability(CommandCapabilities {
+            tmux_runtime_active: tmux_enabled,
+            install_cli_available,
+        })
     }
 
-    fn command_palette_action_status_hint_for_state(
-        action: CommandAction,
-        install_cli_available: bool,
-    ) -> Option<&'static str> {
-        match action {
-            CommandAction::InstallCli if !install_cli_available => Some("Installed"),
-            _ => None,
+    fn command_palette_status_hint_for_unavailable_reason(
+        reason: CommandUnavailableReason,
+    ) -> &'static str {
+        match reason {
+            CommandUnavailableReason::RequiresTmuxRuntime => "tmux required",
+            CommandUnavailableReason::InstallCliAlreadyInstalled => "Installed",
         }
     }
 
@@ -98,15 +103,29 @@ impl TerminalView {
         title: &str,
         keywords: &str,
         install_cli_available: bool,
+        tmux_enabled: bool,
     ) -> CommandPaletteItem {
-        let enabled = Self::command_palette_action_available_for_state(action, install_cli_available);
-        let status_hint =
-            Self::command_palette_action_status_hint_for_state(action, install_cli_available);
-        CommandPaletteItem::command_with_state(title, keywords, action, enabled, status_hint)
+        let availability = Self::command_palette_action_availability_for_state(
+            action,
+            install_cli_available,
+            tmux_enabled,
+        );
+        let status_hint = availability
+            .reason
+            .map(Self::command_palette_status_hint_for_unavailable_reason);
+
+        CommandPaletteItem::command_with_state(
+            title,
+            keywords,
+            action,
+            availability.enabled,
+            status_hint,
+        )
     }
 
     fn command_palette_command_items_for_state(
         install_cli_available: bool,
+        tmux_enabled: bool,
     ) -> Vec<CommandPaletteItem> {
         CommandAction::palette_entries()
             .into_iter()
@@ -116,6 +135,7 @@ impl TerminalView {
                     entry.title,
                     entry.keywords,
                     install_cli_available,
+                    tmux_enabled,
                 )
             })
             .collect()
@@ -124,9 +144,18 @@ impl TerminalView {
     fn command_palette_items_for_mode(&self, mode: CommandPaletteMode) -> Vec<CommandPaletteItem> {
         match mode {
             CommandPaletteMode::Commands => {
-                Self::command_palette_command_items_for_state(self.install_cli_available())
+                Self::command_palette_command_items_for_state(
+                    self.install_cli_available(),
+                    self.runtime_uses_tmux(),
+                )
             }
             CommandPaletteMode::Themes => self.command_palette_theme_items(),
+            CommandPaletteMode::TmuxSessions => self
+                .command_palette
+                .tmux_session_items_for_query(
+                    self.command_palette.input().text(),
+                    self.tmux_active_session_name_for_session_palette().as_deref(),
+                ),
         }
     }
 
@@ -152,6 +181,18 @@ impl TerminalView {
         cx: &mut Context<Self>,
     ) {
         self.command_palette.clear_shortcut_cache();
+        if mode == CommandPaletteMode::TmuxSessions {
+            if let Err(error) = self.reload_tmux_session_palette_items() {
+                // Keep the tmux session palette usable when list-sessions fails by
+                // preserving the selected socket target and rendering intent-specific rows.
+                self.command_palette
+                    .set_tmux_session_rows(
+                        Vec::new(),
+                        self.tmux_primary_socket_target_for_session_palette(),
+                    );
+                termy_toast::error(format!("Failed to list tmux sessions: {error}"));
+            }
+        }
         let items = self.command_palette_items_for_mode(mode);
         self.command_palette.set_items(items);
         self.inline_input_selecting = false;
@@ -205,7 +246,17 @@ impl TerminalView {
         animate_selection: bool,
         cx: &mut Context<Self>,
     ) {
-        self.command_palette.refilter_current_query();
+        if self.command_palette.mode() == CommandPaletteMode::TmuxSessions {
+            let items = self
+                .command_palette
+                .tmux_session_items_for_query(
+                    self.command_palette.input().text(),
+                    self.tmux_active_session_name_for_session_palette().as_deref(),
+                );
+            self.command_palette.set_items(items);
+        } else {
+            self.command_palette.refilter_current_query();
+        }
         let len = self.command_palette.filtered_len();
 
         if len == 0 {
@@ -334,10 +385,22 @@ impl TerminalView {
 
         match nav_key {
             CommandPaletteNavKey::Escape => {
-                match Self::command_palette_escape_action(self.command_palette.mode()) {
+                match Self::command_palette_escape_action(
+                    self.command_palette.mode(),
+                    self.command_palette.tmux_session_intent(),
+                ) {
                     CommandPaletteEscapeAction::ClosePalette => self.close_command_palette(cx),
                     CommandPaletteEscapeAction::BackToCommands => {
                         self.set_command_palette_mode(CommandPaletteMode::Commands, false, cx);
+                    }
+                    CommandPaletteEscapeAction::BackToTmuxRenameSelect => {
+                        if self.command_palette.back_from_tmux_rename_input() {
+                            self.apply_command_palette_mode_setup(
+                                CommandPaletteMode::TmuxSessions,
+                                false,
+                                cx,
+                            );
+                        }
                     }
                 }
             }
@@ -361,10 +424,21 @@ impl TerminalView {
         }
     }
 
-    fn command_palette_escape_action(mode: CommandPaletteMode) -> CommandPaletteEscapeAction {
+    fn command_palette_escape_action(
+        mode: CommandPaletteMode,
+        tmux_session_intent: TmuxSessionIntent,
+    ) -> CommandPaletteEscapeAction {
         match mode {
             CommandPaletteMode::Commands => CommandPaletteEscapeAction::ClosePalette,
             CommandPaletteMode::Themes => CommandPaletteEscapeAction::BackToCommands,
+            CommandPaletteMode::TmuxSessions
+                if tmux_session_intent == TmuxSessionIntent::RenameInput =>
+            {
+                CommandPaletteEscapeAction::BackToTmuxRenameSelect
+            }
+            CommandPaletteMode::TmuxSessions => {
+                CommandPaletteEscapeAction::BackToCommands
+            }
         }
     }
 
@@ -399,7 +473,11 @@ impl TerminalView {
         match item.kind {
             CommandPaletteItemKind::Command(action) => {
                 if !item.enabled {
-                    termy_toast::info(Self::command_palette_disabled_action_message(action));
+                    termy_toast::info(Self::command_palette_disabled_action_message_for_state(
+                        action,
+                        self.install_cli_available(),
+                        self.runtime_uses_tmux(),
+                    ));
                     cx.notify();
                     return;
                 }
@@ -408,13 +486,79 @@ impl TerminalView {
             CommandPaletteItemKind::Theme(theme_id) => {
                 self.select_theme_from_palette(theme_id.as_str(), cx)
             }
+            CommandPaletteItemKind::TmuxSessionAttachOrSwitch {
+                session_name,
+                socket_target,
+            }
+            | CommandPaletteItemKind::TmuxSessionCreateAndAttach {
+                session_name,
+                socket_target,
+            } => self.activate_tmux_session_from_palette(
+                session_name.as_str(),
+                socket_target,
+                item.enabled,
+                item.tmux_status_hint,
+                cx,
+            ),
+            CommandPaletteItemKind::TmuxSessionDetachCurrent => {
+                self.detach_current_tmux_session_from_palette(cx)
+            }
+            CommandPaletteItemKind::TmuxSessionOpenRenameMode => {
+                self.open_tmux_session_rename_mode_from_palette(cx)
+            }
+            CommandPaletteItemKind::TmuxSessionOpenKillMode => {
+                self.open_tmux_session_kill_mode_from_palette(cx)
+            }
+            CommandPaletteItemKind::TmuxSessionRenameSelect {
+                session_name,
+                socket_target,
+            } => self.select_tmux_session_for_rename_from_palette(
+                session_name.as_str(),
+                socket_target,
+                item.enabled,
+                item.tmux_status_hint,
+                cx,
+            ),
+            CommandPaletteItemKind::TmuxSessionRenameApply {
+                current_session_name,
+                next_session_name,
+                socket_target,
+            } => self.apply_tmux_session_rename_from_palette(
+                current_session_name.as_str(),
+                next_session_name.as_str(),
+                socket_target,
+                item.enabled,
+                item.tmux_status_hint,
+                cx,
+            ),
+            CommandPaletteItemKind::TmuxSessionKill {
+                session_name,
+                socket_target,
+            } => self.confirm_kill_tmux_session_from_palette(
+                session_name.as_str(),
+                socket_target,
+                item.enabled,
+                item.tmux_status_hint,
+                cx,
+            ),
         }
     }
 
-    fn command_palette_disabled_action_message(action: CommandAction) -> &'static str {
-        match action {
-            CommandAction::InstallCli => "CLI is already installed",
-            _ => "Command is currently unavailable",
+    fn command_palette_disabled_action_message_for_state(
+        action: CommandAction,
+        install_cli_available: bool,
+        tmux_enabled: bool,
+    ) -> &'static str {
+        let availability = Self::command_palette_action_availability_for_state(
+            action,
+            install_cli_available,
+            tmux_enabled,
+        );
+
+        match availability.reason {
+            Some(CommandUnavailableReason::RequiresTmuxRuntime) => "Attach a tmux session to use this command",
+            Some(CommandUnavailableReason::InstallCliAlreadyInstalled) => "CLI is already installed",
+            None => "Command is currently unavailable",
         }
     }
 
@@ -460,12 +604,14 @@ impl TerminalView {
             }
             CommandAction::NewTab => termy_toast::success("Opened new tab"),
             CommandAction::CloseTab => termy_toast::info("Closed active tab"),
+            CommandAction::ClosePaneOrTab => termy_toast::info("Closed active pane or tab"),
             CommandAction::ZoomIn => termy_toast::info("Zoomed in"),
             CommandAction::ZoomOut => termy_toast::info("Zoomed out"),
             CommandAction::ZoomReset => termy_toast::info("Zoom reset"),
             CommandAction::ImportColors => {}
             CommandAction::Quit
             | CommandAction::SwitchTheme
+            | CommandAction::ManageTmuxSessions
             | CommandAction::AppInfo
             | CommandAction::NativeSdkExample
             | CommandAction::RestartApp
@@ -474,6 +620,20 @@ impl TerminalView {
             | CommandAction::MoveTabRight
             | CommandAction::SwitchTabLeft
             | CommandAction::SwitchTabRight
+            | CommandAction::SplitPaneVertical
+            | CommandAction::SplitPaneHorizontal
+            | CommandAction::ClosePane
+            | CommandAction::FocusPaneLeft
+            | CommandAction::FocusPaneRight
+            | CommandAction::FocusPaneUp
+            | CommandAction::FocusPaneDown
+            | CommandAction::FocusPaneNext
+            | CommandAction::FocusPanePrevious
+            | CommandAction::ResizePaneLeft
+            | CommandAction::ResizePaneRight
+            | CommandAction::ResizePaneUp
+            | CommandAction::ResizePaneDown
+            | CommandAction::TogglePaneZoom
             | CommandAction::CheckForUpdates
             | CommandAction::ToggleCommandPalette
             | CommandAction::Copy
@@ -491,7 +651,11 @@ impl TerminalView {
     }
 
     fn command_palette_should_stay_open(action: CommandAction) -> bool {
-        action == CommandAction::SwitchTheme
+        matches!(
+            action,
+            CommandAction::SwitchTheme
+                | CommandAction::ManageTmuxSessions
+        )
     }
 }
 
@@ -502,12 +666,32 @@ mod tests {
     #[test]
     fn escape_action_is_mode_dependent() {
         assert_eq!(
-            TerminalView::command_palette_escape_action(CommandPaletteMode::Commands),
+            TerminalView::command_palette_escape_action(
+                CommandPaletteMode::Commands,
+                TmuxSessionIntent::AttachOrSwitch,
+            ),
             CommandPaletteEscapeAction::ClosePalette
         );
         assert_eq!(
-            TerminalView::command_palette_escape_action(CommandPaletteMode::Themes),
+            TerminalView::command_palette_escape_action(
+                CommandPaletteMode::Themes,
+                TmuxSessionIntent::AttachOrSwitch,
+            ),
             CommandPaletteEscapeAction::BackToCommands
+        );
+        assert_eq!(
+            TerminalView::command_palette_escape_action(
+                CommandPaletteMode::TmuxSessions,
+                TmuxSessionIntent::AttachOrSwitch,
+            ),
+            CommandPaletteEscapeAction::BackToCommands
+        );
+        assert_eq!(
+            TerminalView::command_palette_escape_action(
+                CommandPaletteMode::TmuxSessions,
+                TmuxSessionIntent::RenameInput,
+            ),
+            CommandPaletteEscapeAction::BackToTmuxRenameSelect
         );
     }
 
@@ -530,9 +714,12 @@ mod tests {
     }
 
     #[test]
-    fn switch_theme_is_the_only_action_that_keeps_palette_open() {
+    fn palette_mode_actions_keep_palette_open() {
         assert!(TerminalView::command_palette_should_stay_open(
             CommandAction::SwitchTheme
+        ));
+        assert!(TerminalView::command_palette_should_stay_open(
+            CommandAction::ManageTmuxSessions
         ));
         assert!(!TerminalView::command_palette_should_stay_open(
             CommandAction::NewTab
@@ -541,8 +728,8 @@ mod tests {
 
     #[test]
     fn install_cli_command_is_present_and_tracks_availability_state() {
-        let available_items = TerminalView::command_palette_command_items_for_state(true);
-        let unavailable_items = TerminalView::command_palette_command_items_for_state(false);
+        let available_items = TerminalView::command_palette_command_items_for_state(true, true);
+        let unavailable_items = TerminalView::command_palette_command_items_for_state(false, true);
 
         let available_install_cli = available_items
             .iter()
@@ -566,10 +753,58 @@ mod tests {
     }
 
     #[test]
+    fn tmux_query_surfaces_only_tmux_sessions_entry() {
+        let items = TerminalView::command_palette_command_items_for_state(true, true);
+        let filtered_indices = super::state::filter_command_palette_item_indices_by_query(
+            &items,
+            "tmux",
+        );
+        let filtered_actions = filtered_indices
+            .into_iter()
+            .filter_map(|index| match items[index].kind {
+                CommandPaletteItemKind::Command(action) => Some(action),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+
+        assert_eq!(filtered_actions, vec![CommandAction::ManageTmuxSessions]);
+    }
+
+    #[test]
+    fn tmux_commands_are_present_but_disabled_when_tmux_runtime_is_off() {
+        let items = TerminalView::command_palette_command_items_for_state(false, false);
+        let split = items
+            .iter()
+            .find_map(|item| match item.kind {
+                CommandPaletteItemKind::Command(CommandAction::SplitPaneVertical) => Some(item),
+                _ => None,
+            })
+            .expect("missing split pane command");
+        assert!(!split.enabled);
+        assert_eq!(split.status_hint, Some("tmux required"));
+    }
+
+    #[test]
     fn install_cli_disabled_message_matches_expected_copy() {
         assert_eq!(
-            TerminalView::command_palette_disabled_action_message(CommandAction::InstallCli),
+            TerminalView::command_palette_disabled_action_message_for_state(
+                CommandAction::InstallCli,
+                false,
+                true,
+            ),
             "CLI is already installed"
+        );
+    }
+
+    #[test]
+    fn tmux_disabled_message_matches_expected_copy() {
+        assert_eq!(
+            TerminalView::command_palette_disabled_action_message_for_state(
+                CommandAction::SplitPaneVertical,
+                true,
+                false,
+            ),
+            "Attach a tmux session to use this command"
         );
     }
 }

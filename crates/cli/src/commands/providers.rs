@@ -1,8 +1,8 @@
 use std::path::PathBuf;
 
 use termy_command_core::{
-    CommandId, KeybindLineRef, default_resolved_keybinds, parse_keybind_directives_from_iter,
-    resolve_keybinds,
+    CommandCapabilities, CommandId, CommandUnavailableReason, KeybindLineRef, default_resolved_keybinds,
+    parse_keybind_directives_from_iter, resolve_keybinds,
 };
 use termy_config_core::{AppConfig, config_path};
 use termy_theme_core::{ANSI_COLOR_NAMES, format_hex};
@@ -12,16 +12,12 @@ pub fn config_file_path() -> Result<PathBuf, String> {
 }
 
 pub fn list_action_lines() -> Vec<String> {
-    CommandId::all_config_names()
-        .map(ToString::to_string)
-        .collect()
+    action_lines_for_tmux_enabled(load_config_for_providers().tmux_enabled)
 }
 
 pub fn list_keybind_lines() -> Vec<String> {
-    resolved_keybinds()
-        .into_iter()
-        .map(|binding| format!("{} = {}", binding.trigger, binding.action.config_name()))
-        .collect()
+    let config = load_config_for_providers();
+    keybind_lines_for_tmux_enabled(&config.keybind_lines, config.tmux_enabled)
 }
 
 pub fn list_theme_lines() -> Vec<String> {
@@ -94,24 +90,70 @@ pub fn list_fonts_lines() -> Vec<String> {
 }
 
 pub fn active_theme_id() -> String {
-    if let Some(path) = config_path() {
-        if let Ok(contents) = std::fs::read_to_string(path) {
-            return AppConfig::from_contents(&contents).theme;
-        }
-    }
-
-    AppConfig::default().theme
+    load_config_for_providers().theme
 }
 
-fn resolved_keybinds() -> Vec<termy_command_core::ResolvedKeybind> {
+fn load_config_for_providers() -> AppConfig {
     if let Some(path) = config_path()
         && let Ok(contents) = std::fs::read_to_string(path)
     {
-        let config = AppConfig::from_contents(&contents);
-        return resolve_keybinds_for_lines(&config.keybind_lines);
+        return AppConfig::from_contents(&contents);
     }
 
-    resolve_keybinds_for_lines(&[])
+    AppConfig::default()
+}
+
+fn action_lines_for_tmux_enabled(tmux_enabled: bool) -> Vec<String> {
+    action_lines_for_capabilities(tmux_enabled, detect_install_cli_available())
+}
+
+fn action_lines_for_capabilities(tmux_enabled: bool, install_cli_available: bool) -> Vec<String> {
+    let capabilities = command_capabilities(tmux_enabled, install_cli_available);
+
+    CommandId::all()
+        .map(|id| {
+            let (available, tmux_required, restart_required) =
+                command_metadata_for_id(id, capabilities);
+            format!(
+                "{}\tavailable={}\ttmux_required={}\trestart_required={}",
+                id.config_name(),
+                available,
+                tmux_required,
+                restart_required
+            )
+        })
+        .collect()
+}
+
+fn keybind_lines_for_tmux_enabled(
+    lines: &[termy_config_core::KeybindConfigLine],
+    tmux_enabled: bool,
+) -> Vec<String> {
+    keybind_lines_for_capabilities(lines, tmux_enabled, detect_install_cli_available())
+}
+
+fn keybind_lines_for_capabilities(
+    lines: &[termy_config_core::KeybindConfigLine],
+    tmux_enabled: bool,
+    install_cli_available: bool,
+) -> Vec<String> {
+    let capabilities = command_capabilities(tmux_enabled, install_cli_available);
+
+    resolve_keybinds_for_lines(lines)
+        .into_iter()
+        .map(|binding| {
+            let (available, tmux_required, restart_required) =
+                command_metadata_for_id(binding.action, capabilities);
+            format!(
+                "{} = {}\tavailable={}\ttmux_required={}\trestart_required={}",
+                binding.trigger,
+                binding.action.config_name(),
+                available,
+                tmux_required,
+                restart_required
+            )
+        })
+        .collect()
 }
 
 fn resolve_keybinds_for_lines(
@@ -123,6 +165,27 @@ fn resolve_keybinds_for_lines(
             value: line.value.as_str(),
         }));
     resolve_keybinds(default_resolved_keybinds(), &directives)
+}
+
+fn detect_install_cli_available() -> bool {
+    !termy_cli_install_core::is_cli_installed()
+}
+
+fn command_capabilities(tmux_enabled: bool, install_cli_available: bool) -> CommandCapabilities {
+    CommandCapabilities {
+        tmux_runtime_active: tmux_enabled,
+        install_cli_available,
+    }
+}
+
+fn command_metadata_for_id(
+    id: CommandId,
+    capabilities: CommandCapabilities,
+) -> (bool, bool, bool) {
+    let availability = id.availability(capabilities);
+    let tmux_required = id.is_tmux_only();
+    let restart_required = availability.reason == Some(CommandUnavailableReason::RequiresTmuxRuntime);
+    (availability.enabled, tmux_required, restart_required)
 }
 
 #[cfg(target_os = "macos")]
@@ -210,7 +273,10 @@ fn list_fonts_impl() -> Vec<String> {
 
 #[cfg(test)]
 mod tests {
-    use super::{list_action_lines, list_theme_lines, resolve_keybinds_for_lines};
+    use super::{
+        action_lines_for_capabilities, action_lines_for_tmux_enabled, keybind_lines_for_capabilities,
+        keybind_lines_for_tmux_enabled, list_theme_lines, resolve_keybinds_for_lines,
+    };
     use termy_command_core::{
         CommandId, KeybindLineRef, default_resolved_keybinds, parse_keybind_directives_from_iter,
         resolve_keybinds,
@@ -239,12 +305,39 @@ mod tests {
     }
 
     #[test]
-    fn actions_match_command_catalog_exactly() {
-        let actions = list_action_lines();
-        let expected = CommandId::all_config_names()
-            .map(ToString::to_string)
-            .collect::<Vec<_>>();
-        assert_eq!(actions, expected);
+    fn list_actions_includes_tmux_metadata_when_runtime_is_disabled() {
+        let actions = action_lines_for_tmux_enabled(false);
+        let split_pane_line = actions
+            .iter()
+            .find(|line| line.starts_with(CommandId::SplitPaneVertical.config_name()))
+            .expect("missing split_pane_vertical action metadata");
+        assert!(split_pane_line.contains("available=false"));
+        assert!(split_pane_line.contains("tmux_required=true"));
+        assert!(split_pane_line.contains("restart_required=true"));
+    }
+
+    #[test]
+    fn list_actions_reports_install_cli_unavailable_when_probe_is_false() {
+        let actions = action_lines_for_capabilities(true, false);
+        let install_cli_line = actions
+            .iter()
+            .find(|line| line.starts_with(CommandId::InstallCli.config_name()))
+            .expect("missing install_cli action metadata");
+        assert!(install_cli_line.contains("available=false"));
+        assert!(install_cli_line.contains("tmux_required=false"));
+        assert!(install_cli_line.contains("restart_required=false"));
+    }
+
+    #[test]
+    fn list_actions_reports_restart_not_required_when_tmux_runtime_is_active() {
+        let actions = action_lines_for_capabilities(true, true);
+        let split_pane_line = actions
+            .iter()
+            .find(|line| line.starts_with(CommandId::SplitPaneVertical.config_name()))
+            .expect("missing split_pane_vertical action metadata");
+        assert!(split_pane_line.contains("available=true"));
+        assert!(split_pane_line.contains("tmux_required=true"));
+        assert!(split_pane_line.contains("restart_required=false"));
     }
 
     #[test]
@@ -272,6 +365,56 @@ mod tests {
 
         let resolved_from_core = resolve_keybinds(default_resolved_keybinds(), &directives);
         assert_eq!(resolved_from_provider, resolved_from_core);
+    }
+
+    #[test]
+    fn list_keybinds_includes_tmux_metadata_when_runtime_is_disabled() {
+        let keybind_lines = keybind_lines_for_tmux_enabled(&[], false);
+        let split_pane_line = keybind_lines
+            .iter()
+            .find(|line| line.starts_with("secondary-d = split_pane_vertical"))
+            .expect("missing secondary-d split pane keybind metadata");
+        assert!(split_pane_line.contains("available=false"));
+        assert!(split_pane_line.contains("tmux_required=true"));
+        assert!(split_pane_line.contains("restart_required=true"));
+    }
+
+    #[test]
+    fn list_keybinds_reports_install_cli_unavailable_when_probe_is_false() {
+        let keybind_lines = keybind_lines_for_capabilities(
+            &[KeybindConfigLine {
+                line_number: 1,
+                value: "Secondary-I=install_cli".to_string(),
+            }],
+            true,
+            false,
+        );
+        let install_cli_line = keybind_lines
+            .iter()
+            .find(|line| line.starts_with("secondary-i = install_cli"))
+            .expect("missing install_cli keybind metadata");
+        assert!(install_cli_line.contains("available=false"));
+        assert!(install_cli_line.contains("tmux_required=false"));
+        assert!(install_cli_line.contains("restart_required=false"));
+    }
+
+    #[test]
+    fn list_keybinds_reports_restart_not_required_when_tmux_runtime_is_active() {
+        let keybind_lines = keybind_lines_for_capabilities(
+            &[KeybindConfigLine {
+                line_number: 1,
+                value: "Secondary-D=split_pane_vertical".to_string(),
+            }],
+            true,
+            true,
+        );
+        let split_pane_line = keybind_lines
+            .iter()
+            .find(|line| line.starts_with("secondary-d = split_pane_vertical"))
+            .expect("missing split_pane_vertical keybind metadata");
+        assert!(split_pane_line.contains("available=true"));
+        assert!(split_pane_line.contains("tmux_required=true"));
+        assert!(split_pane_line.contains("restart_required=false"));
     }
 
     #[test]

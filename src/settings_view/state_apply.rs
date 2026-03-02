@@ -17,12 +17,15 @@ impl SettingsWindow {
             EditableField::Shell
             | EditableField::Term
             | EditableField::Colorterm
+            | EditableField::TmuxBinary
             | EditableField::ScrollbackHistory
             | EditableField::InactiveTabScrollback
             | EditableField::ScrollMultiplier
             | EditableField::CursorStyle
             | EditableField::ScrollbarVisibility
-            | EditableField::ScrollbarStyle => self.apply_terminal_field(field, value),
+            | EditableField::ScrollbarStyle
+            | EditableField::PaneFocusEffect
+            | EditableField::PaneFocusStrength => self.apply_terminal_field(field, value),
             EditableField::TabFallbackTitle
             | EditableField::TabTitlePriority
             | EditableField::TabTitleMode
@@ -142,6 +145,13 @@ impl SettingsWindow {
                     config::set_root_setting(termy_config_core::RootSettingId::Colorterm, value)
                 }
             }
+            EditableField::TmuxBinary => {
+                if value.is_empty() {
+                    return Err("tmux binary cannot be empty".to_string());
+                }
+                self.config.tmux_binary = value.to_string();
+                config::set_root_setting(termy_config_core::RootSettingId::TmuxBinary, value)
+            }
             EditableField::ScrollbackHistory => {
                 let parsed = value
                     .parse::<usize>()
@@ -220,6 +230,57 @@ impl SettingsWindow {
                     termy_config_core::TerminalScrollbarStyle::Theme => "theme",
                 };
                 config::set_root_setting(termy_config_core::RootSettingId::ScrollbarStyle, canonical)
+            }
+            EditableField::PaneFocusEffect => {
+                let parsed = match value.to_ascii_lowercase().as_str() {
+                    "off" => termy_config_core::PaneFocusEffect::Off,
+                    "soft_spotlight" | "softspotlight" | "soft-spotlight" => {
+                        termy_config_core::PaneFocusEffect::SoftSpotlight
+                    }
+                    "cinematic" => termy_config_core::PaneFocusEffect::Cinematic,
+                    "minimal" => termy_config_core::PaneFocusEffect::Minimal,
+                    _ => {
+                        return Err(
+                            "Pane focus effect must be off, soft_spotlight, cinematic, or minimal"
+                                .to_string(),
+                        )
+                    }
+                };
+                self.config.pane_focus_effect = parsed;
+                let canonical = match parsed {
+                    termy_config_core::PaneFocusEffect::Off => "off",
+                    termy_config_core::PaneFocusEffect::SoftSpotlight => "soft_spotlight",
+                    termy_config_core::PaneFocusEffect::Cinematic => "cinematic",
+                    termy_config_core::PaneFocusEffect::Minimal => "minimal",
+                };
+                config::set_root_setting(
+                    termy_config_core::RootSettingId::PaneFocusEffect,
+                    canonical,
+                )
+            }
+            EditableField::PaneFocusStrength => {
+                if value.is_empty() {
+                    return Err("Pane focus strength cannot be empty".to_string());
+                }
+                let has_percent_suffix = value.ends_with('%');
+                let normalized_input = value.trim_end_matches('%').trim();
+                let parsed = normalized_input
+                    .parse::<f32>()
+                    .map_err(|_| "Pane focus strength must be a finite number".to_string())?;
+                if !parsed.is_finite() {
+                    return Err("Pane focus strength must be a finite number".to_string());
+                }
+                let normalized = if has_percent_suffix {
+                    parsed / 100.0
+                } else {
+                    parsed
+                }
+                .clamp(0.0, 2.0);
+                self.config.pane_focus_strength = normalized;
+                config::set_root_setting(
+                    termy_config_core::RootSettingId::PaneFocusStrength,
+                    &format!("{:.3}", normalized),
+                )
             }
             _ => unreachable!("invalid terminal field"),
         }

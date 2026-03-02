@@ -1,18 +1,45 @@
 use super::super::*;
+use super::state_tmux::{TmuxSessionIntent, TmuxSessionRow, TmuxSessionStatusHint};
 use crate::config::SHELL_DECIDE_THEME_ID;
 use gpui::UniformListScrollHandle;
 use std::collections::HashMap;
+use termy_terminal_ui::TmuxSocketTarget;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(in super::super) enum CommandPaletteMode {
     Commands,
     Themes,
+    TmuxSessions,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(super) enum CommandPaletteItemKind {
     Command(CommandAction),
     Theme(String),
+    TmuxSessionAttachOrSwitch {
+        session_name: String,
+        socket_target: TmuxSocketTarget,
+    },
+    TmuxSessionCreateAndAttach {
+        session_name: String,
+        socket_target: TmuxSocketTarget,
+    },
+    TmuxSessionDetachCurrent,
+    TmuxSessionOpenRenameMode,
+    TmuxSessionOpenKillMode,
+    TmuxSessionRenameSelect {
+        session_name: String,
+        socket_target: TmuxSocketTarget,
+    },
+    TmuxSessionRenameApply {
+        current_session_name: String,
+        next_session_name: String,
+        socket_target: TmuxSocketTarget,
+    },
+    TmuxSessionKill {
+        session_name: String,
+        socket_target: TmuxSocketTarget,
+    },
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -21,6 +48,7 @@ pub(super) struct CommandPaletteItem {
     pub(super) keywords: String,
     pub(super) enabled: bool,
     pub(super) status_hint: Option<&'static str>,
+    pub(super) tmux_status_hint: Option<TmuxSessionStatusHint>,
     pub(super) kind: CommandPaletteItemKind,
 }
 
@@ -37,6 +65,7 @@ impl CommandPaletteItem {
             keywords: keywords.to_string(),
             enabled,
             status_hint,
+            tmux_status_hint: None,
             kind: CommandPaletteItemKind::Command(action),
         }
     }
@@ -54,6 +83,7 @@ impl CommandPaletteItem {
             keywords,
             enabled: true,
             status_hint: None,
+            tmux_status_hint: None,
             kind: CommandPaletteItemKind::Theme(theme_id),
         }
     }
@@ -63,6 +93,9 @@ impl CommandPaletteItem {
 pub(in super::super) struct CommandPaletteState {
     open: bool,
     mode: CommandPaletteMode,
+    pub(super) tmux_session_intent: TmuxSessionIntent,
+    pub(super) tmux_rename_source_session: Option<String>,
+    pub(super) tmux_rename_source_socket: Option<TmuxSocketTarget>,
     input: InlineInputState,
     items: Vec<CommandPaletteItem>,
     filtered_indices: Vec<usize>,
@@ -74,6 +107,8 @@ pub(in super::super) struct CommandPaletteState {
     scroll_last_tick: Option<Instant>,
     show_keybinds: bool,
     shortcut_cache: HashMap<CommandAction, Option<String>>,
+    pub(super) tmux_session_rows: Vec<TmuxSessionRow>,
+    pub(super) tmux_create_socket_target: TmuxSocketTarget,
 }
 
 impl CommandPaletteState {
@@ -81,6 +116,9 @@ impl CommandPaletteState {
         Self {
             open: false,
             mode: CommandPaletteMode::Commands,
+            tmux_session_intent: TmuxSessionIntent::AttachOrSwitch,
+            tmux_rename_source_session: None,
+            tmux_rename_source_socket: None,
             input: InlineInputState::new(String::new()),
             items: Vec::new(),
             filtered_indices: Vec::new(),
@@ -92,6 +130,8 @@ impl CommandPaletteState {
             scroll_last_tick: None,
             show_keybinds,
             shortcut_cache: HashMap::new(),
+            tmux_session_rows: Vec::new(),
+            tmux_create_socket_target: TmuxSocketTarget::Default,
         }
     }
 
@@ -285,6 +325,11 @@ impl CommandPaletteState {
         self.scroll_handle = UniformListScrollHandle::new();
         self.shortcut_cache.clear();
         self.reset_scroll_animation_state();
+        if self.mode != CommandPaletteMode::TmuxSessions {
+            self.tmux_session_intent = TmuxSessionIntent::AttachOrSwitch;
+            self.tmux_rename_source_session = None;
+            self.tmux_rename_source_socket = None;
+        }
     }
 }
 
@@ -447,7 +492,7 @@ mod tests {
             .into_iter()
             .filter_map(|index| match items[index].kind {
                 CommandPaletteItemKind::Command(action) => Some(action),
-                CommandPaletteItemKind::Theme(_) => None,
+                _ => None,
             })
             .collect();
 
@@ -474,7 +519,7 @@ mod tests {
             .into_iter()
             .filter_map(|index| match items[index].kind {
                 CommandPaletteItemKind::Command(action) => Some(action),
-                CommandPaletteItemKind::Theme(_) => None,
+                _ => None,
             })
             .collect();
 

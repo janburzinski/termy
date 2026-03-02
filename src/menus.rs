@@ -2,19 +2,28 @@ use crate::commands::{CommandAction, CommandMenuEntry, MenuRoot};
 use gpui::{Menu, MenuItem};
 #[cfg(target_os = "macos")]
 use gpui::SystemMenuType;
+use termy_command_core::{CommandAvailability, CommandCapabilities, CommandUnavailableReason};
 
 const INSTALL_CLI_TITLE: &str = "Install CLI";
 const INSTALL_CLI_INSTALLED_TITLE: &str = "Install CLI (Installed)";
+const SPLIT_PANE_VERTICAL_TMUX_REQUIRED_TITLE: &str = "Split Pane Vertical (tmux required)";
+const SPLIT_PANE_HORIZONTAL_TMUX_REQUIRED_TITLE: &str = "Split Pane Horizontal (tmux required)";
+const FOCUS_NEXT_PANE_TMUX_REQUIRED_TITLE: &str = "Focus Next Pane (tmux required)";
 
-pub(crate) fn app_menus(install_cli_available: bool) -> Vec<Menu> {
+pub(crate) fn app_menus(install_cli_available: bool, tmux_enabled: bool) -> Vec<Menu> {
+    let capabilities = CommandCapabilities {
+        tmux_runtime_active: tmux_enabled,
+        install_cli_available,
+    };
+
     CommandAction::menu_roots()
         .iter()
         .copied()
-        .map(|root| build_menu(root, install_cli_available))
+        .map(|root| build_menu(root, capabilities))
         .collect()
 }
 
-fn build_menu(root: MenuRoot, install_cli_available: bool) -> Menu {
+fn build_menu(root: MenuRoot, capabilities: CommandCapabilities) -> Menu {
     let entries = CommandAction::menu_entries_for_root(root);
     let mut items = Vec::new();
 
@@ -26,7 +35,7 @@ fn build_menu(root: MenuRoot, install_cli_available: bool) -> Menu {
         }
     }
 
-    append_menu_entries(&mut items, &entries, install_cli_available);
+    append_menu_entries(&mut items, &entries, capabilities);
 
     Menu {
         name: root.title().into(),
@@ -37,40 +46,72 @@ fn build_menu(root: MenuRoot, install_cli_available: bool) -> Menu {
 fn append_menu_entries(
     items: &mut Vec<MenuItem>,
     entries: &[CommandMenuEntry],
-    install_cli_available: bool,
+    capabilities: CommandCapabilities,
 ) {
     let mut previous_section = None;
 
     for entry in entries {
+        let availability = entry.action.availability(capabilities);
+        let Some(title) = menu_item_title(entry, availability) else {
+            continue;
+        };
+
         if let Some(section) = previous_section {
             if section != entry.section {
                 items.push(MenuItem::separator());
             }
         }
 
-        let title = if entry.action == CommandAction::InstallCli {
-            if install_cli_available {
-                INSTALL_CLI_TITLE
-            } else {
-                INSTALL_CLI_INSTALLED_TITLE
-            }
-        } else {
-            entry.title
-        };
-
         items.push(entry.action.to_menu_item(title, entry.role));
         previous_section = Some(entry.section);
     }
 }
 
+fn menu_item_title(
+    entry: &CommandMenuEntry,
+    availability: CommandAvailability,
+) -> Option<&'static str> {
+    if availability.enabled {
+        if entry.action == CommandAction::InstallCli {
+            return Some(INSTALL_CLI_TITLE);
+        }
+        return Some(entry.title);
+    }
+
+    match availability.reason {
+        // Keep only the requested pane actions visible in native mode and label
+        // them explicitly so users understand why those rows are unavailable.
+        Some(CommandUnavailableReason::RequiresTmuxRuntime) => tmux_required_menu_title(entry.action),
+        Some(CommandUnavailableReason::InstallCliAlreadyInstalled) => {
+            Some(INSTALL_CLI_INSTALLED_TITLE)
+        }
+        None => unreachable!("disabled command must include an unavailable reason"),
+    }
+}
+
+fn tmux_required_menu_title(action: CommandAction) -> Option<&'static str> {
+    match action {
+        CommandAction::SplitPaneVertical => Some(SPLIT_PANE_VERTICAL_TMUX_REQUIRED_TITLE),
+        CommandAction::SplitPaneHorizontal => Some(SPLIT_PANE_HORIZONTAL_TMUX_REQUIRED_TITLE),
+        CommandAction::FocusPaneNext => Some(FOCUS_NEXT_PANE_TMUX_REQUIRED_TITLE),
+        _ => None,
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{INSTALL_CLI_INSTALLED_TITLE, INSTALL_CLI_TITLE, app_menus};
+    use super::{
+        FOCUS_NEXT_PANE_TMUX_REQUIRED_TITLE, INSTALL_CLI_INSTALLED_TITLE, INSTALL_CLI_TITLE,
+        SPLIT_PANE_HORIZONTAL_TMUX_REQUIRED_TITLE, SPLIT_PANE_VERTICAL_TMUX_REQUIRED_TITLE,
+        app_menus,
+    };
+    use crate::commands::CommandAction;
     use gpui::{MenuItem, OsAction};
+    use termy_command_core::{CommandCapabilities, CommandUnavailableReason};
 
     #[test]
     fn top_level_menu_order_is_stable() {
-        let names = app_menus(true)
+        let names = app_menus(true, true)
             .into_iter()
             .map(|menu| menu.name.to_string())
             .collect::<Vec<_>>();
@@ -80,7 +121,7 @@ mod tests {
 
     #[test]
     fn app_menu_includes_services_only_on_macos() {
-        let app_menu = app_menus(true)
+        let app_menu = app_menus(true, true)
             .into_iter()
             .find(|menu| menu.name.as_ref() == "Termy")
             .expect("missing Termy menu");
@@ -99,7 +140,7 @@ mod tests {
 
     #[test]
     fn edit_menu_copy_and_paste_use_os_actions() {
-        let edit_menu = app_menus(true)
+        let edit_menu = app_menus(true, true)
             .into_iter()
             .find(|menu| menu.name.as_ref() == "Edit")
             .expect("missing Edit menu");
@@ -126,7 +167,7 @@ mod tests {
 
     #[test]
     fn separators_are_inserted_only_between_sections() {
-        for menu in app_menus(true) {
+        for menu in app_menus(true, true) {
             if menu.items.is_empty() {
                 continue;
             }
@@ -148,11 +189,11 @@ mod tests {
 
     #[test]
     fn install_cli_menu_title_reflects_install_state() {
-        let help_menu_available = app_menus(true)
+        let help_menu_available = app_menus(true, true)
             .into_iter()
             .find(|menu| menu.name.as_ref() == "Help")
             .expect("missing Help menu");
-        let help_menu_installed = app_menus(false)
+        let help_menu_installed = app_menus(false, true)
             .into_iter()
             .find(|menu| menu.name.as_ref() == "Help")
             .expect("missing Help menu");
@@ -178,6 +219,95 @@ mod tests {
         assert_eq!(
             install_cli_titles(&help_menu_installed),
             [INSTALL_CLI_INSTALLED_TITLE]
+        );
+
+        let availability = CommandAction::InstallCli.availability(CommandCapabilities {
+            tmux_runtime_active: true,
+            install_cli_available: false,
+        });
+        assert_eq!(
+            availability.reason,
+            Some(CommandUnavailableReason::InstallCliAlreadyInstalled)
+        );
+    }
+
+    #[test]
+    fn file_menu_shows_tmux_required_pane_actions_when_tmux_is_disabled() {
+        let caps = CommandCapabilities {
+            tmux_runtime_active: false,
+            install_cli_available: true,
+        };
+        for action in [
+            CommandAction::SplitPaneVertical,
+            CommandAction::SplitPaneHorizontal,
+            CommandAction::FocusPaneNext,
+        ] {
+            let availability = action.availability(caps);
+            assert_eq!(
+                availability.reason,
+                Some(CommandUnavailableReason::RequiresTmuxRuntime)
+            );
+        }
+        let close_pane_or_tab_availability = CommandAction::ClosePaneOrTab.availability(caps);
+        assert!(close_pane_or_tab_availability.enabled);
+        assert_eq!(close_pane_or_tab_availability.reason, None);
+
+        let file_menu = app_menus(true, false)
+            .into_iter()
+            .find(|menu| menu.name.as_ref() == "File")
+            .expect("missing File menu");
+
+        let labels = file_menu
+            .items
+            .iter()
+            .map(|item| match item {
+                MenuItem::Action { name, .. } => name.as_ref().to_string(),
+                MenuItem::Separator => "<separator>".to_string(),
+                MenuItem::Submenu(_) | MenuItem::SystemMenu(_) => "<non-action>".to_string(),
+            })
+            .collect::<Vec<_>>();
+
+        assert_eq!(
+            labels,
+            vec![
+                "New Tab",
+                "Rename Tab",
+                "<separator>",
+                "Close Pane or Tab",
+                "Tmux Sessions",
+                SPLIT_PANE_VERTICAL_TMUX_REQUIRED_TITLE,
+                SPLIT_PANE_HORIZONTAL_TMUX_REQUIRED_TITLE,
+                FOCUS_NEXT_PANE_TMUX_REQUIRED_TITLE,
+            ]
+            .into_iter()
+            .map(ToString::to_string)
+            .collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn tmux_only_actions_outside_requested_file_set_remain_hidden_when_tmux_is_disabled() {
+        let all_menu_titles = app_menus(true, false)
+            .into_iter()
+            .flat_map(|menu| menu.items)
+            .filter_map(|item| {
+                let MenuItem::Action { name, .. } = item else {
+                    return None;
+                };
+                Some(name.as_ref().to_string())
+            })
+            .collect::<Vec<_>>();
+
+        assert!(
+            !all_menu_titles.iter().any(|title| matches!(
+                title.as_str(),
+                "Split Pane Vertical"
+                    | "Split Pane Horizontal"
+                    | "Close Pane"
+                    | "Focus Next Pane"
+                    | "Focus Previous Pane"
+                    | "Toggle Pane Zoom"
+            ))
         );
     }
 }

@@ -1,4 +1,6 @@
 use super::super::*;
+use std::path::Path;
+use termy_terminal_ui::TmuxPaneState;
 
 impl TerminalView {
     pub(crate) fn fallback_title(&self) -> &str {
@@ -43,6 +45,72 @@ impl TerminalView {
 
         resolved.push_str(remaining);
         resolved
+    }
+
+    pub(crate) fn is_shell_command(command: &str) -> bool {
+        let command = command.trim();
+        if command.is_empty() {
+            return false;
+        }
+        let Some(first_token) = command.split_whitespace().next() else {
+            return false;
+        };
+        let token = Path::new(first_token)
+            .file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or(first_token)
+            .trim_start_matches('-');
+        if token.is_empty() {
+            return false;
+        }
+        let mut normalized = token.to_ascii_lowercase();
+        if let Some(stem) = normalized.strip_suffix(".exe") {
+            normalized = stem.to_string();
+        }
+
+        matches!(
+            normalized.as_str(),
+            "bash"
+                | "zsh"
+                | "fish"
+                | "sh"
+                | "dash"
+                | "ksh"
+                | "tcsh"
+                | "csh"
+                | "nu"
+                | "pwsh"
+                | "powershell"
+                | "cmd"
+        )
+    }
+
+    pub(crate) fn derive_tmux_shell_title(
+        tab_title: &TabTitleConfig,
+        pane: &TmuxPaneState,
+    ) -> Option<String> {
+        let cwd = pane.current_path.trim();
+        let command = pane.current_command.trim();
+        let resolved = if Self::is_shell_command(command) {
+            Self::resolve_template(
+                &tab_title.prompt_format,
+                (!cwd.is_empty()).then_some(cwd),
+                None,
+            )
+        } else {
+            Self::resolve_template(
+                &tab_title.command_format,
+                None,
+                (!command.is_empty()).then_some(command),
+            )
+        };
+
+        let resolved = resolved.trim();
+        if resolved.is_empty() {
+            return None;
+        }
+
+        Some(Self::truncate_tab_title(resolved))
     }
 
     pub(crate) fn should_seed_predicted_prompt_title(tab_title: &TabTitleConfig) -> bool {
@@ -221,6 +289,23 @@ mod tests {
     use super::*;
     use crate::config::{TabTitleConfig, TabTitleSource};
 
+    fn pane_with(path: &str, command: &str) -> TmuxPaneState {
+        TmuxPaneState {
+            id: "%1".to_string(),
+            window_id: "@1".to_string(),
+            session_id: "$1".to_string(),
+            is_active: true,
+            left: 0,
+            top: 0,
+            width: 80,
+            height: 24,
+            cursor_x: 0,
+            cursor_y: 0,
+            current_path: path.to_string(),
+            current_command: command.to_string(),
+        }
+    }
+
     #[test]
     fn predicted_prompt_seed_title_uses_cwd_template_when_explicit_is_enabled() {
         let config = TabTitleConfig::default();
@@ -261,5 +346,48 @@ mod tests {
         let resolved =
             TerminalView::resolve_template("start {unknown} end", Some("cwd"), Some("cmd"));
         assert_eq!(resolved, "start {unknown} end");
+    }
+
+    #[test]
+    fn is_shell_command_matches_fixed_shell_set_case_insensitively() {
+        assert!(TerminalView::is_shell_command("zsh"));
+        assert!(TerminalView::is_shell_command("PwSh"));
+        assert!(TerminalView::is_shell_command("/bin/bash"));
+        assert!(TerminalView::is_shell_command("-zsh"));
+        assert!(TerminalView::is_shell_command("pwsh.exe"));
+        assert!(TerminalView::is_shell_command("bash -l"));
+        assert!(TerminalView::is_shell_command("cmd"));
+        assert!(!TerminalView::is_shell_command("sleep"));
+        assert!(!TerminalView::is_shell_command(""));
+    }
+
+    #[test]
+    fn derive_tmux_shell_title_uses_prompt_format_for_shell_commands() {
+        let mut tab_title = TabTitleConfig::default();
+        tab_title.prompt_format = "cwd:{cwd}".to_string();
+        let pane = pane_with("/tmp/work", "zsh");
+
+        let title = TerminalView::derive_tmux_shell_title(&tab_title, &pane);
+        assert_eq!(title.as_deref(), Some("cwd:/tmp/work"));
+    }
+
+    #[test]
+    fn derive_tmux_shell_title_uses_command_format_for_non_shell_commands() {
+        let mut tab_title = TabTitleConfig::default();
+        tab_title.command_format = "run:{command}".to_string();
+        let pane = pane_with("/tmp/work", "sleep");
+
+        let title = TerminalView::derive_tmux_shell_title(&tab_title, &pane);
+        assert_eq!(title.as_deref(), Some("run:sleep"));
+    }
+
+    #[test]
+    fn derive_tmux_shell_title_returns_none_when_resolved_title_is_empty() {
+        let mut tab_title = TabTitleConfig::default();
+        tab_title.command_format = " ".to_string();
+        let pane = pane_with("/tmp/work", "sleep");
+
+        let title = TerminalView::derive_tmux_shell_title(&tab_title, &pane);
+        assert!(title.is_none());
     }
 }

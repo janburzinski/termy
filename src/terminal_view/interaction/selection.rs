@@ -7,8 +7,153 @@ enum TerminalSelectionCharClass {
     Other,
 }
 
+fn is_hidden_or_spacer(flags: Flags) -> bool {
+    flags.intersects(Flags::WIDE_CHAR_SPACER | Flags::LEADING_WIDE_CHAR_SPACER | Flags::HIDDEN)
+}
+
+fn fill_grid_rows_for_selection(
+    terminal: &Terminal,
+    min_row: usize,
+    max_row: usize,
+    cols: usize,
+    grid: &mut [Vec<char>],
+) {
+    let _ = terminal.for_each_renderable_cell(|display_offset, term_line, col, cell| {
+        let Some(row) = TerminalView::viewport_row_from_term_line(term_line, display_offset) else {
+            return;
+        };
+        if row < min_row || row > max_row || col >= cols {
+            return;
+        }
+        if is_hidden_or_spacer(cell.flags) {
+            return;
+        }
+
+        let c = cell.c;
+        if c != '\0' {
+            let grid_row = row - min_row;
+            grid[grid_row][col] = if c.is_control() { ' ' } else { c };
+        }
+    });
+}
+
+fn row_text_from_terminal(terminal: &Terminal, row: usize, cols: usize) -> Vec<char> {
+    let mut line = vec![' '; cols];
+    let _ = terminal.for_each_renderable_cell(|display_offset, term_line, col, cell| {
+        let Some(cell_row) = TerminalView::viewport_row_from_term_line(term_line, display_offset)
+        else {
+            return;
+        };
+        if cell_row != row || col >= cols {
+            return;
+        }
+
+        if is_hidden_or_spacer(cell.flags) {
+            return;
+        }
+
+        let c = cell.c;
+        if c != '\0' {
+            line[col] = if c.is_control() { ' ' } else { c };
+        }
+    });
+    line
+}
 
 impl TerminalView {
+    pub(in super::super) fn position_to_pane_cell(
+        &self,
+        position: gpui::Point<Pixels>,
+        clamp: bool,
+    ) -> Option<(String, CellPos)> {
+        let tab = self.tabs.get(self.active_tab)?;
+        let (padding_x, padding_y) = self.effective_terminal_padding();
+        let (x, y) = self.terminal_content_position(position);
+        let active_pane_id = tab.active_pane_id();
+
+        let evaluate_pane = |pane: &TerminalPane, allow_clamp_outside: bool| -> Option<CellPos> {
+            let size = pane.terminal.size();
+            if size.cols == 0 || size.rows == 0 {
+                return None;
+            }
+            let cell_width: f32 = size.cell_width.into();
+            let cell_height: f32 = size.cell_height.into();
+            if cell_width <= f32::EPSILON || cell_height <= f32::EPSILON {
+                return None;
+            }
+
+            let origin_x = padding_x + (f32::from(pane.left) * cell_width);
+            let origin_y = padding_y + (f32::from(pane.top) * cell_height);
+            let width = f32::from(size.cols) * cell_width;
+            let height = f32::from(size.rows) * cell_height;
+            if width <= f32::EPSILON || height <= f32::EPSILON {
+                return None;
+            }
+
+            let mut local_x = x - origin_x;
+            let mut local_y = y - origin_y;
+            let is_inside =
+                local_x >= 0.0 && local_x < width && local_y >= 0.0 && local_y < height;
+            if !is_inside {
+                if !clamp || !allow_clamp_outside {
+                    return None;
+                }
+                local_x = local_x.clamp(0.0, width - f32::EPSILON);
+                local_y = local_y.clamp(0.0, height - f32::EPSILON);
+            }
+
+            let max_col = i32::from(size.cols) - 1;
+            let max_row = i32::from(size.rows) - 1;
+            if max_col < 0 || max_row < 0 {
+                return None;
+            }
+
+            let mut col = (local_x / cell_width).floor() as i32;
+            let mut row = (local_y / cell_height).floor() as i32;
+            if clamp {
+                col = col.clamp(0, max_col);
+                row = row.clamp(0, max_row);
+            } else if col < 0 || col > max_col || row < 0 || row > max_row {
+                return None;
+            }
+
+            Some(CellPos {
+                col: col as usize,
+                row: row as usize,
+            })
+        };
+
+        let pointer_inside_any_pane = tab
+            .panes
+            .iter()
+            .any(|pane| evaluate_pane(pane, false).is_some());
+
+        // When clamping points that are outside all panes, prefer the active pane first
+        // so we never return a clamped hit for an inactive pane before the active pane.
+        if clamp
+            && !pointer_inside_any_pane
+            && let Some(active_pane_id) = active_pane_id
+            && let Some(active_pane) = tab
+                .panes
+                .iter()
+                .find(|pane| pane.id.as_str() == active_pane_id)
+            && let Some(cell) = evaluate_pane(active_pane, true)
+        {
+            return Some((active_pane.id.clone(), cell));
+        }
+
+        for pane in &tab.panes {
+            if active_pane_id == Some(pane.id.as_str()) && clamp {
+                continue;
+            }
+            if let Some(cell) = evaluate_pane(pane, false) {
+                return Some((pane.id.clone(), cell));
+            }
+        }
+
+        None
+    }
+
     pub(in super::super) fn has_selection(&self) -> bool {
         matches!((self.selection_anchor, self.selection_head), (Some(anchor), Some(head)) if self.selection_moved || anchor != head)
     }
@@ -47,48 +192,14 @@ impl TerminalView {
         position: gpui::Point<Pixels>,
         clamp: bool,
     ) -> Option<CellPos> {
-        let (padding_x, padding_y) = self.effective_terminal_padding();
-        let size = self.active_terminal().size();
-        if size.cols == 0 || size.rows == 0 {
-            return None;
-        }
-
-        let mut x: f32 = position.x.into();
-        let mut y: f32 = position.y.into();
-        x -= padding_x;
-        y -= self.chrome_height() + padding_y;
-
-        let cell_width: f32 = size.cell_width.into();
-        let cell_height: f32 = size.cell_height.into();
-        if cell_width <= 0.0 || cell_height <= 0.0 {
-            return None;
-        }
-
-        let mut col = (x / cell_width).floor() as i32;
-        let mut row = (y / cell_height).floor() as i32;
-
-        let max_col = i32::from(size.cols) - 1;
-        let max_row = i32::from(size.rows) - 1;
-        if max_col < 0 || max_row < 0 {
-            return None;
-        }
-
-        if clamp {
-            col = col.clamp(0, max_col);
-            row = row.clamp(0, max_row);
-        } else if col < 0 || col > max_col || row < 0 || row > max_row {
-            return None;
-        }
-
-        Some(CellPos {
-            col: col as usize,
-            row: row as usize,
-        })
+        let (pane_id, cell) = self.position_to_pane_cell(position, clamp)?;
+        self.is_active_pane_id(&pane_id).then_some(cell)
     }
 
     pub(in super::super) fn selected_text(&self) -> Option<String> {
         let (start, end) = self.selection_range()?;
-        let size = self.active_terminal().size();
+        let terminal = self.active_terminal()?;
+        let size = terminal.size();
         let cols = size.cols as usize;
         let rows = size.rows as usize;
         if cols == 0 || rows == 0 {
@@ -115,26 +226,7 @@ impl TerminalView {
         let max_row = selection_end.row;
         let grid_rows = max_row - min_row + 1;
         let mut grid = vec![vec![' '; cols]; grid_rows];
-        self.active_terminal().with_term(|term| {
-            let content = term.renderable_content();
-            for cell in content.display_iter {
-                let Some(row) =
-                    Self::viewport_row_from_term_line(cell.point.line.0, content.display_offset)
-                else {
-                    continue;
-                };
-                let col = cell.point.column.0;
-                if row < min_row || row > max_row || col >= cols {
-                    continue;
-                }
-
-                let c = cell.cell.c;
-                if c != '\0' {
-                    let grid_row = row - min_row;
-                    grid[grid_row][col] = if c.is_control() { ' ' } else { c };
-                }
-            }
-        });
+        fill_grid_rows_for_selection(terminal, min_row, max_row, cols, &mut grid);
 
         let mut lines = Vec::new();
         for row in min_row..=max_row {
@@ -168,43 +260,15 @@ impl TerminalView {
     }
 
     pub(in super::super) fn row_text(&self, row: usize) -> Option<Vec<char>> {
-        let size = self.active_terminal().size();
+        let terminal = self.active_terminal()?;
+        let size = terminal.size();
         let cols = size.cols as usize;
         let rows = size.rows as usize;
         if cols == 0 || row >= rows {
             return None;
         }
 
-        let mut line = vec![' '; cols];
-        self.active_terminal().with_term(|term| {
-            let content = term.renderable_content();
-            for cell in content.display_iter {
-                let Some(cell_row) =
-                    Self::viewport_row_from_term_line(cell.point.line.0, content.display_offset)
-                else {
-                    continue;
-                };
-                if cell_row != row {
-                    continue;
-                }
-
-                let col = cell.point.column.0;
-                if col >= cols {
-                    continue;
-                }
-
-                if cell.cell.flags.intersects(
-                    Flags::WIDE_CHAR_SPACER | Flags::LEADING_WIDE_CHAR_SPACER | Flags::HIDDEN,
-                ) {
-                    continue;
-                }
-
-                let c = cell.cell.c;
-                if c != '\0' {
-                    line[col] = if c.is_control() { ' ' } else { c };
-                }
-            }
-        });
+        let line = row_text_from_terminal(terminal, row, cols);
 
         Some(line)
     }
@@ -263,7 +327,10 @@ impl TerminalView {
     }
 
     pub(in super::super) fn select_line_at_row(&mut self, row: usize) -> bool {
-        let size = self.active_terminal().size();
+        let Some(terminal) = self.active_terminal() else {
+            return false;
+        };
+        let size = terminal.size();
         let cols = size.cols as usize;
         let rows = size.rows as usize;
         if cols == 0 || row >= rows {
@@ -337,6 +404,8 @@ impl TerminalView {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::{thread, time::Duration};
+    use termy_terminal_ui::TerminalSize;
 
     #[test]
     fn viewport_row_maps_scrollback_lines_into_viewport() {
@@ -344,4 +413,55 @@ mod tests {
         assert_eq!(TerminalView::viewport_row_from_term_line(4, 3), Some(7));
     }
 
+    #[test]
+    fn terminal_read_adapter_extracts_rows_for_both_runtime_variants() {
+        let size = TerminalSize {
+            cols: 16,
+            rows: 3,
+            ..TerminalSize::default()
+        };
+
+        let tmux = Terminal::new_tmux(size, 128);
+        tmux.feed_output(b"row-adapter\r\n");
+        let tmux_row = row_text_from_terminal(&tmux, 0, usize::from(size.cols));
+        assert_eq!(tmux_row.len(), usize::from(size.cols));
+        assert!(tmux_row.iter().any(|c| !c.is_whitespace()));
+
+        let native = Terminal::new_native(size, None, None, None, None)
+            .expect("native terminal should initialize for row adapter test");
+        native.write_input(b"printf native-row-adapter\r");
+        let expected_native_token = "native-row";
+        let mut native_row = row_text_from_terminal(&native, 0, usize::from(size.cols));
+        for _ in 0..40 {
+            let rendered_native_row: String = native_row.iter().collect();
+            if rendered_native_row.contains(expected_native_token) {
+                break;
+            }
+            thread::sleep(Duration::from_millis(25));
+            let _ = native.process_events();
+            native_row = row_text_from_terminal(&native, 0, usize::from(size.cols));
+        }
+        assert_eq!(native_row.len(), usize::from(size.cols));
+        let rendered_native_row: String = native_row.iter().collect();
+        assert!(rendered_native_row.contains(expected_native_token));
+    }
+
+    #[test]
+    fn pane_row_mapping_uses_chrome_adjusted_pointer_y() {
+        let chrome_height = 34.0;
+        let padding_y = 6.0;
+        let pane_top = 1u16;
+        let cell_height = 20.0;
+        let expected_row = 2i32;
+
+        let window_y = chrome_height
+            + padding_y
+            + ((f32::from(pane_top) + expected_row as f32) * cell_height)
+            + 0.1;
+        let content_y = TerminalView::window_y_to_terminal_content_y(window_y, chrome_height);
+        let origin_y = padding_y + (f32::from(pane_top) * cell_height);
+        let row = ((content_y - origin_y) / cell_height).floor() as i32;
+
+        assert_eq!(row, expected_row);
+    }
 }

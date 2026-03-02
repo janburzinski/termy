@@ -1,6 +1,6 @@
 use crate::{
-    AppConfig, ConfigDiagnosticKind, ConfigParseReport, CursorStyle, Rgb8, TabCloseVisibility,
-    TabTitleMode, TabTitleSource, TabWidthMode, TerminalScrollbarStyle,
+    AppConfig, ConfigDiagnosticKind, ConfigParseReport, CursorStyle, PaneFocusEffect, Rgb8,
+    TabCloseVisibility, TabTitleMode, TabTitleSource, TabWidthMode, TerminalScrollbarStyle,
     TerminalScrollbarVisibility, WorkingDirFallback,
 };
 
@@ -10,6 +10,13 @@ fn parse(input: &str) -> AppConfig {
 
 fn parse_report(input: &str) -> ConfigParseReport {
     AppConfig::from_contents_with_report(input)
+}
+
+#[test]
+fn defaults_enable_tmux_persistence_and_raise_pane_focus_strength() {
+    let defaults = parse("");
+    assert!(defaults.tmux_persistence);
+    assert!((defaults.pane_focus_strength - 0.6).abs() < f32::EPSILON);
 }
 
 #[test]
@@ -210,6 +217,21 @@ fn enum_keys_parse_table_driven() {
         TerminalScrollbarStyle::Neutral
     );
 
+    let pane_focus_effect_cases = [
+        ("off", PaneFocusEffect::Off),
+        ("soft_spotlight", PaneFocusEffect::SoftSpotlight),
+        ("cinematic", PaneFocusEffect::Cinematic),
+        ("minimal", PaneFocusEffect::Minimal),
+    ];
+    for (input, expected) in pane_focus_effect_cases {
+        let config = parse(&format!("pane_focus_effect = {}\n", input));
+        assert_eq!(config.pane_focus_effect, expected);
+    }
+    assert_eq!(
+        parse("pane_focus_effect = unknown\n").pane_focus_effect,
+        PaneFocusEffect::SoftSpotlight
+    );
+
     let fallback_cases = [
         ("home", WorkingDirFallback::Home),
         ("process", WorkingDirFallback::Process),
@@ -226,6 +248,7 @@ fn enum_keys_parse_table_driven() {
 
 #[derive(Clone, Copy)]
 enum BoolField {
+    TmuxShowActivePaneBorder,
     ShowTermyInTitlebar,
     CursorBlink,
     BackgroundBlur,
@@ -237,6 +260,7 @@ enum BoolField {
 impl BoolField {
     fn key(self) -> &'static str {
         match self {
+            Self::TmuxShowActivePaneBorder => "tmux_show_active_pane_border",
             Self::ShowTermyInTitlebar => "show_termy_in_titlebar",
             Self::CursorBlink => "cursor_blink",
             Self::BackgroundBlur => "background_blur",
@@ -248,6 +272,7 @@ impl BoolField {
 
     fn read(self, config: &AppConfig) -> bool {
         match self {
+            Self::TmuxShowActivePaneBorder => config.tmux_show_active_pane_border,
             Self::ShowTermyInTitlebar => config.show_termy_in_titlebar,
             Self::CursorBlink => config.cursor_blink,
             Self::BackgroundBlur => config.background_blur,
@@ -262,6 +287,7 @@ impl BoolField {
 fn bool_keys_parse_table_driven() {
     let defaults = AppConfig::default();
     let fields = [
+        BoolField::TmuxShowActivePaneBorder,
         BoolField::ShowTermyInTitlebar,
         BoolField::CursorBlink,
         BoolField::BackgroundBlur,
@@ -362,6 +388,20 @@ fn numeric_keys_parse_table_driven() {
         defaults.background_opacity
     );
 
+    assert_eq!(parse("pane_focus_strength = -0.5\n").pane_focus_strength, 0.0);
+    assert_eq!(parse("pane_focus_strength = 4\n").pane_focus_strength, 2.0);
+    let nan_pane_focus_strength = parse_report("pane_focus_strength = NaN\n");
+    assert_eq!(
+        nan_pane_focus_strength.config.pane_focus_strength,
+        defaults.pane_focus_strength
+    );
+    assert!(
+        nan_pane_focus_strength
+            .diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.kind == ConfigDiagnosticKind::InvalidValue)
+    );
+
     assert_eq!(
         parse("mouse_scroll_multiplier = -1\n").mouse_scroll_multiplier,
         0.1
@@ -398,6 +438,37 @@ fn runtime_env_options_parse() {
     assert_eq!(config.shell.as_deref(), Some("/bin/zsh"));
     assert_eq!(config.working_dir_fallback, WorkingDirFallback::Process);
     assert!(config.colorterm.is_none());
+}
+
+#[test]
+fn tmux_runtime_options_parse() {
+    let config = parse(
+        "tmux_enabled = true\n\
+         tmux_persistence = true\n\
+         tmux_show_active_pane_border = true\n\
+         tmux_binary = /opt/homebrew/bin/tmux\n\
+         working_dir_fallback = process\n",
+    );
+
+    assert!(config.tmux_enabled);
+    assert!(config.tmux_persistence);
+    assert!(config.tmux_show_active_pane_border);
+    assert_eq!(config.tmux_binary, "/opt/homebrew/bin/tmux");
+    assert_eq!(config.working_dir_fallback, WorkingDirFallback::Process);
+}
+
+#[test]
+fn removed_tmux_persist_scrollback_key_produces_unknown_root_key_diagnostic() {
+    let report = parse_report("tmux_persist_scrollback = true\n");
+    assert_eq!(report.diagnostics.len(), 1);
+    assert_eq!(report.diagnostics[0].kind, ConfigDiagnosticKind::UnknownRootKey);
+}
+
+#[test]
+fn removed_tmux_session_name_key_produces_unknown_root_key_diagnostic() {
+    let report = parse_report("tmux_session_name = work\n");
+    assert_eq!(report.diagnostics.len(), 1);
+    assert_eq!(report.diagnostics[0].kind, ConfigDiagnosticKind::UnknownRootKey);
 }
 
 #[test]

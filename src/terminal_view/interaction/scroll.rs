@@ -2,7 +2,76 @@ use super::super::scrollbar as terminal_scrollbar;
 use super::*;
 use crate::ui::scrollbar as ui_scrollbar;
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum WheelScrollPaneDecision {
+    UseActivePane,
+    FocusHoveredPane,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum WheelScrollRetargetResult {
+    Unchanged,
+    Switched,
+    Abort,
+    NotRetargeted,
+}
+
+fn terminal_scrollbar_local_y_from_window_y(
+    window_y: f32,
+    chrome_height: f32,
+    surface_origin_y: f32,
+    surface_height: f32,
+) -> Option<f32> {
+    let content_y = TerminalView::window_y_to_terminal_content_y(window_y, chrome_height);
+    if content_y < surface_origin_y || content_y > surface_origin_y + surface_height {
+        return None;
+    }
+
+    Some(content_y - surface_origin_y)
+}
+
 impl TerminalView {
+    fn should_attempt_wheel_scroll_retarget(touch_phase: TouchPhase, delta_lines: i32) -> bool {
+        matches!(touch_phase, TouchPhase::Moved) && delta_lines != 0
+    }
+
+    fn wheel_scroll_retarget_result(
+        touch_phase: TouchPhase,
+        delta_lines: i32,
+        attempted_result: WheelScrollRetargetResult,
+    ) -> WheelScrollRetargetResult {
+        if Self::should_attempt_wheel_scroll_retarget(touch_phase, delta_lines) {
+            attempted_result
+        } else {
+            WheelScrollRetargetResult::NotRetargeted
+        }
+    }
+
+    fn wheel_scroll_retarget_result_for_decision(
+        decision: WheelScrollPaneDecision,
+        hovered_pane_id: Option<&str>,
+        focus_succeeded: bool,
+        active_pane_id: Option<&str>,
+    ) -> WheelScrollRetargetResult {
+        match decision {
+            WheelScrollPaneDecision::UseActivePane => WheelScrollRetargetResult::Unchanged,
+            WheelScrollPaneDecision::FocusHoveredPane => {
+                let Some(pane_id) = hovered_pane_id else {
+                    return WheelScrollRetargetResult::Unchanged;
+                };
+
+                if !focus_succeeded {
+                    return WheelScrollRetargetResult::Abort;
+                }
+                if active_pane_id == Some(pane_id) {
+                    WheelScrollRetargetResult::Switched
+                } else {
+                    WheelScrollRetargetResult::Abort
+                }
+            }
+        }
+    }
+
     fn consume_suppressed_scroll_event(
         &mut self,
         touch_phase: TouchPhase,
@@ -67,7 +136,10 @@ impl TerminalView {
             }
             TouchPhase::Ended => 0,
             TouchPhase::Moved => {
-                let size = self.active_terminal().size();
+                let Some(terminal) = self.active_terminal() else {
+                    return 0;
+                };
+                let size = terminal.size();
                 if size.rows == 0 {
                     return 0;
                 }
@@ -87,12 +159,55 @@ impl TerminalView {
         }
     }
 
+    fn wheel_scroll_pane_decision(
+        runtime_uses_tmux: bool,
+        hovered_pane_id: Option<&str>,
+        active_pane_id: Option<&str>,
+    ) -> WheelScrollPaneDecision {
+        if !runtime_uses_tmux
+            || hovered_pane_id.is_none()
+            || hovered_pane_id == active_pane_id
+        {
+            WheelScrollPaneDecision::UseActivePane
+        } else {
+            WheelScrollPaneDecision::FocusHoveredPane
+        }
+    }
+
+    fn retarget_scroll_wheel_pane(
+        &mut self,
+        position: gpui::Point<Pixels>,
+        cx: &mut Context<Self>,
+    ) -> WheelScrollRetargetResult {
+        let hovered_pane_id = self
+            .position_to_pane_cell(position, false)
+            .map(|(pane_id, _)| pane_id);
+        let decision = Self::wheel_scroll_pane_decision(
+            self.runtime_uses_tmux(),
+            hovered_pane_id.as_deref(),
+            self.active_pane_id(),
+        );
+
+        let focus_succeeded = matches!(decision, WheelScrollPaneDecision::FocusHoveredPane)
+            && hovered_pane_id
+                .as_deref()
+                .is_some_and(|pane_id| self.focus_pane_target(pane_id, cx));
+
+        Self::wheel_scroll_retarget_result_for_decision(
+            decision,
+            hovered_pane_id.as_deref(),
+            focus_succeeded,
+            self.active_pane_id(),
+        )
+    }
+
     pub(in super::super) fn terminal_scrollbar_hit_test(
         &self,
         position: gpui::Point<Pixels>,
         window: &Window,
     ) -> Option<TerminalScrollbarHit> {
-        let (display_offset, _) = self.active_terminal().scroll_state();
+        let terminal = self.active_terminal()?;
+        let (display_offset, _) = terminal.scroll_state();
         let force_visible = display_offset > 0
             && self.terminal_scrollbar_mode() != ui_scrollbar::ScrollbarVisibilityMode::AlwaysOff;
         let alpha = self.terminal_scrollbar_alpha(Instant::now());
@@ -104,22 +219,28 @@ impl TerminalView {
         }
 
         let surface = self.terminal_surface_geometry(window)?;
-        let scrollbar_left = surface.origin_x + surface.width - TERMINAL_SCROLLBAR_GUTTER_WIDTH;
-        let scrollbar_right = surface.origin_x + surface.width;
+        let gutter_width = TERMINAL_SCROLLBAR_GUTTER_WIDTH.min(surface.width.max(0.0));
+        if gutter_width <= f32::EPSILON {
+            return None;
+        }
+        let scrollbar_left = (surface.origin_x + surface.width.max(0.0) - gutter_width).max(surface.origin_x);
+        let scrollbar_right = scrollbar_left + gutter_width;
 
         let x: f32 = position.x.into();
         if x < scrollbar_left || x > scrollbar_right {
             return None;
         }
 
-        let y: f32 = position.y.into();
-        if y < surface.origin_y || y > surface.origin_y + surface.height {
-            return None;
-        }
+        let window_y: f32 = position.y.into();
+        let local_y = terminal_scrollbar_local_y_from_window_y(
+            window_y,
+            self.chrome_height(),
+            surface.origin_y,
+            surface.height,
+        )?;
 
         let layout = self.terminal_scrollbar_layout_for_track(surface.height)?;
         let metrics = layout.metrics;
-        let local_y = y - surface.origin_y;
         let thumb_hit =
             local_y >= metrics.thumb_top && local_y <= metrics.thumb_top + metrics.thumb_height;
 
@@ -135,7 +256,10 @@ impl TerminalView {
         target_offset: f32,
         layout: terminal_scrollbar::TerminalScrollbarLayout,
     ) -> bool {
-        let (display_offset, _) = self.active_terminal().scroll_state();
+        let Some(terminal) = self.active_terminal() else {
+            return false;
+        };
+        let (display_offset, _) = terminal.scroll_state();
         let line_height = layout.range.viewport_extent / layout.viewport_rows as f32;
         if line_height <= f32::EPSILON {
             return false;
@@ -152,7 +276,7 @@ impl TerminalView {
             return false;
         }
 
-        self.active_terminal().scroll_display(delta)
+        terminal.scroll_display(delta)
     }
 
     pub(in super::super) fn handle_terminal_scrollbar_mouse_down(
@@ -206,7 +330,7 @@ impl TerminalView {
         let range = layout.range;
         let metrics = layout.metrics;
 
-        let y: f32 = position.y.into();
+        let (_, y) = self.terminal_content_position(position);
         let local_y = (y - surface.origin_y).clamp(0.0, surface.height);
         let thumb_top = (local_y - drag.thumb_grab_offset).clamp(0.0, metrics.travel);
         let changed = self.apply_terminal_scroll_offset(
@@ -220,7 +344,10 @@ impl TerminalView {
     }
 
     pub(in super::super) fn scroll_to_bottom(&mut self, cx: &mut Context<Self>) {
-        if self.active_terminal().scroll_to_bottom() {
+        if self
+            .active_terminal()
+            .is_some_and(|terminal| terminal.scroll_to_bottom())
+        {
             self.mark_terminal_scrollbar_activity(cx);
             cx.notify();
         }
@@ -237,16 +364,42 @@ impl TerminalView {
         }
 
         cx.stop_propagation();
+        let delta_lines = self.terminal_scroll_delta_to_lines(event);
+        let attempted_retarget = if Self::should_attempt_wheel_scroll_retarget(
+            event.touch_phase,
+            delta_lines,
+        ) {
+            self.retarget_scroll_wheel_pane(event.position, cx)
+        } else {
+            WheelScrollRetargetResult::Unchanged
+        };
+        let retarget_result =
+            Self::wheel_scroll_retarget_result(event.touch_phase, delta_lines, attempted_retarget);
+        match retarget_result {
+            WheelScrollRetargetResult::Unchanged => {}
+            WheelScrollRetargetResult::Switched => {
+                // Avoid carrying fractional wheel residue across pane boundaries.
+                self.terminal_scroll_accumulator_y = 0.0;
+            }
+            WheelScrollRetargetResult::Abort => {
+                self.terminal_scroll_accumulator_y = 0.0;
+                return;
+            }
+            WheelScrollRetargetResult::NotRetargeted => {}
+        }
+
         if matches!(event.touch_phase, TouchPhase::Moved) {
             self.mark_terminal_scrollbar_activity(cx);
         }
 
-        let delta_lines = self.terminal_scroll_delta_to_lines(event);
         if delta_lines == 0 {
             return;
         }
 
-        if self.active_terminal().scroll_display(delta_lines) {
+        if self
+            .active_terminal()
+            .is_some_and(|terminal| terminal.scroll_display(delta_lines))
+        {
             cx.notify();
         } else {
             self.terminal_scroll_accumulator_y = 0.0;
@@ -313,4 +466,81 @@ mod tests {
         assert_eq!(accumulated, 12.0);
     }
 
+    #[test]
+    fn wheel_scroll_pane_decision_uses_active_for_non_tmux() {
+        assert_eq!(
+            TerminalView::wheel_scroll_pane_decision(false, Some("%2"), Some("%1")),
+            WheelScrollPaneDecision::UseActivePane
+        );
+    }
+
+    #[test]
+    fn wheel_scroll_pane_decision_uses_active_when_hovered_matches_active() {
+        assert_eq!(
+            TerminalView::wheel_scroll_pane_decision(true, Some("%7"), Some("%7")),
+            WheelScrollPaneDecision::UseActivePane
+        );
+    }
+
+    #[test]
+    fn wheel_scroll_pane_decision_focuses_hovered_tmux_pane_when_different() {
+        assert_eq!(
+            TerminalView::wheel_scroll_pane_decision(true, Some("%8"), Some("%3")),
+            WheelScrollPaneDecision::FocusHoveredPane
+        );
+    }
+
+    #[test]
+    fn wheel_scroll_retargets_to_switched() {
+        let decision = TerminalView::wheel_scroll_pane_decision(true, Some("%8"), Some("%3"));
+        let attempted = TerminalView::wheel_scroll_retarget_result_for_decision(
+            decision,
+            Some("%8"),
+            true,
+            Some("%8"),
+        );
+        let retarget =
+            TerminalView::wheel_scroll_retarget_result(TouchPhase::Moved, 1, attempted);
+        assert_eq!(retarget, WheelScrollRetargetResult::Switched);
+    }
+
+    #[test]
+    fn wheel_scroll_retargets_to_abort() {
+        let decision = TerminalView::wheel_scroll_pane_decision(true, Some("%8"), Some("%3"));
+        let attempted = TerminalView::wheel_scroll_retarget_result_for_decision(
+            decision,
+            Some("%8"),
+            false,
+            Some("%3"),
+        );
+        let retarget =
+            TerminalView::wheel_scroll_retarget_result(TouchPhase::Moved, 1, attempted);
+        assert_eq!(retarget, WheelScrollRetargetResult::Abort);
+    }
+
+    #[test]
+    fn wheel_scroll_retargets_to_not_retargeted() {
+        let decision = TerminalView::wheel_scroll_pane_decision(true, Some("%8"), Some("%3"));
+        let attempted = TerminalView::wheel_scroll_retarget_result_for_decision(
+            decision,
+            Some("%8"),
+            true,
+            Some("%8"),
+        );
+        let retarget =
+            TerminalView::wheel_scroll_retarget_result(TouchPhase::Ended, 0, attempted);
+        assert_eq!(retarget, WheelScrollRetargetResult::NotRetargeted);
+    }
+
+    #[test]
+    fn terminal_scrollbar_local_y_from_window_y_subtracts_chrome_before_surface_math() {
+        let local_y = terminal_scrollbar_local_y_from_window_y(164.0, 44.0, 100.0, 300.0);
+        assert_eq!(local_y, Some(20.0));
+    }
+
+    #[test]
+    fn terminal_scrollbar_local_y_from_window_y_rejects_points_outside_surface() {
+        let local_y = terminal_scrollbar_local_y_from_window_y(120.0, 44.0, 100.0, 300.0);
+        assert_eq!(local_y, None);
+    }
 }

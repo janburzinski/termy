@@ -12,7 +12,19 @@ Termy keybindings use Ghostty-style trigger overrides via repeated `keybind` lin
 - `secondary-,` -> `open_settings`
 - `secondary-p` -> `toggle_command_palette`
 - `secondary-t` -> `new_tab`
-- `secondary-w` -> `close_tab`
+- `secondary-w` -> `close_pane_or_tab`
+- `secondary-d` -> `split_pane_vertical` (tmux required)
+- `secondary-shift-d` -> `split_pane_horizontal` (tmux required)
+- `secondary-o` -> `focus_pane_next` (tmux required)
+- `secondary-alt-left` -> `focus_pane_left` (tmux required)
+- `secondary-alt-right` -> `focus_pane_right` (tmux required)
+- `secondary-alt-up` -> `focus_pane_up` (tmux required)
+- `secondary-alt-down` -> `focus_pane_down` (tmux required)
+- `secondary-alt-shift-left` -> `resize_pane_left` (tmux required)
+- `secondary-alt-shift-right` -> `resize_pane_right` (tmux required)
+- `secondary-alt-shift-up` -> `resize_pane_up` (tmux required)
+- `secondary-alt-shift-down` -> `resize_pane_down` (tmux required)
+- `secondary-enter` -> `toggle_pane_zoom` (tmux required)
 - `secondary-=` -> `zoom_in`
 - `secondary-+` -> `zoom_in`
 - `secondary--` -> `zoom_out`
@@ -30,7 +42,19 @@ Termy keybindings use Ghostty-style trigger overrides via repeated `keybind` lin
 - `secondary-,` -> `open_settings`
 - `secondary-p` -> `toggle_command_palette`
 - `secondary-t` -> `new_tab`
-- `secondary-w` -> `close_tab`
+- `secondary-w` -> `close_pane_or_tab`
+- `secondary-d` -> `split_pane_vertical` (tmux required)
+- `secondary-shift-d` -> `split_pane_horizontal` (tmux required)
+- `secondary-o` -> `focus_pane_next` (tmux required)
+- `secondary-alt-left` -> `focus_pane_left` (tmux required)
+- `secondary-alt-right` -> `focus_pane_right` (tmux required)
+- `secondary-alt-up` -> `focus_pane_up` (tmux required)
+- `secondary-alt-down` -> `focus_pane_down` (tmux required)
+- `secondary-alt-shift-left` -> `resize_pane_left` (tmux required)
+- `secondary-alt-shift-right` -> `resize_pane_right` (tmux required)
+- `secondary-alt-shift-up` -> `resize_pane_up` (tmux required)
+- `secondary-alt-shift-down` -> `resize_pane_down` (tmux required)
+- `secondary-enter` -> `toggle_pane_zoom` (tmux required)
 - `secondary-=` -> `zoom_in`
 - `secondary-+` -> `zoom_in`
 - `secondary--` -> `zoom_out`
@@ -47,7 +71,19 @@ Termy keybindings use Ghostty-style trigger overrides via repeated `keybind` lin
 - `secondary-,` -> `open_settings`
 - `secondary-p` -> `toggle_command_palette`
 - `secondary-t` -> `new_tab`
-- `secondary-w` -> `close_tab`
+- `secondary-w` -> `close_pane_or_tab`
+- `secondary-d` -> `split_pane_vertical` (tmux required)
+- `secondary-shift-d` -> `split_pane_horizontal` (tmux required)
+- `secondary-o` -> `focus_pane_next` (tmux required)
+- `secondary-alt-left` -> `focus_pane_left` (tmux required)
+- `secondary-alt-right` -> `focus_pane_right` (tmux required)
+- `secondary-alt-up` -> `focus_pane_up` (tmux required)
+- `secondary-alt-down` -> `focus_pane_down` (tmux required)
+- `secondary-alt-shift-left` -> `resize_pane_left` (tmux required)
+- `secondary-alt-shift-right` -> `resize_pane_right` (tmux required)
+- `secondary-alt-shift-up` -> `resize_pane_up` (tmux required)
+- `secondary-alt-shift-down` -> `resize_pane_down` (tmux required)
+- `secondary-enter` -> `toggle_pane_zoom` (tmux required)
 - `secondary-=` -> `zoom_in`
 - `secondary-+` -> `zoom_in`
 - `secondary--` -> `zoom_out`
@@ -64,7 +100,19 @@ Termy keybindings use Ghostty-style trigger overrides via repeated `keybind` lin
 - `secondary-,` -> `open_settings`
 - `secondary-p` -> `toggle_command_palette`
 - `secondary-t` -> `new_tab`
-- `secondary-w` -> `close_tab`
+- `secondary-w` -> `close_pane_or_tab`
+- `secondary-d` -> `split_pane_vertical` (tmux required)
+- `secondary-shift-d` -> `split_pane_horizontal` (tmux required)
+- `secondary-o` -> `focus_pane_next` (tmux required)
+- `secondary-alt-left` -> `focus_pane_left` (tmux required)
+- `secondary-alt-right` -> `focus_pane_right` (tmux required)
+- `secondary-alt-up` -> `focus_pane_up` (tmux required)
+- `secondary-alt-down` -> `focus_pane_down` (tmux required)
+- `secondary-alt-shift-left` -> `resize_pane_left` (tmux required)
+- `secondary-alt-shift-right` -> `resize_pane_right` (tmux required)
+- `secondary-alt-shift-up` -> `resize_pane_up` (tmux required)
+- `secondary-alt-shift-down` -> `resize_pane_down` (tmux required)
+- `secondary-enter` -> `toggle_pane_zoom` (tmux required)
 - `secondary-=` -> `zoom_in`
 - `secondary-+` -> `zoom_in`
 - `secondary--` -> `zoom_out`
@@ -101,10 +149,26 @@ Related UI option:
 
 - `new_tab`
 - `close_tab`
+- `close_pane_or_tab`
 - `move_tab_left`
 - `move_tab_right`
 - `switch_tab_left`
 - `switch_tab_right`
+- `manage_tmux_sessions`
+- `split_pane_vertical` (tmux required)
+- `split_pane_horizontal` (tmux required)
+- `close_pane` (tmux required)
+- `focus_pane_left` (tmux required)
+- `focus_pane_right` (tmux required)
+- `focus_pane_up` (tmux required)
+- `focus_pane_down` (tmux required)
+- `focus_pane_next` (tmux required)
+- `focus_pane_previous` (tmux required)
+- `resize_pane_left` (tmux required)
+- `resize_pane_right` (tmux required)
+- `resize_pane_up` (tmux required)
+- `resize_pane_down` (tmux required)
+- `toggle_pane_zoom` (tmux required)
 - `minimize_window`
 - `rename_tab`
 - `app_info`
@@ -150,7 +214,7 @@ keybind = cmd-w=unbind
 keybind = clear
 keybind = cmd-p=toggle_command_palette
 keybind = cmd-t=new_tab
-keybind = cmd-w=close_tab
+keybind = cmd-w=close_pane_or_tab
 keybind = cmd-c=copy
 keybind = cmd-v=paste
 ```

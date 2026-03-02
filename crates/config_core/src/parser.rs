@@ -2,14 +2,15 @@ use std::collections::HashMap;
 
 use crate::color_keys::{ColorEntryError, apply_color_entry};
 use crate::constants::{
-    MAX_MOUSE_SCROLL_MULTIPLIER, MAX_SCROLLBACK_HISTORY, MIN_MOUSE_SCROLL_MULTIPLIER,
-    SHELL_DECIDE_THEME_ID, VALID_SECTIONS,
+    MAX_MOUSE_SCROLL_MULTIPLIER, MAX_PANE_FOCUS_STRENGTH, MAX_SCROLLBACK_HISTORY,
+    MIN_MOUSE_SCROLL_MULTIPLIER, SHELL_DECIDE_THEME_ID, VALID_SECTIONS,
 };
 use crate::diagnostics::{ConfigDiagnostic, ConfigDiagnosticKind, ConfigParseReport};
 use crate::schema::{RootSettingId, root_setting_from_key, root_setting_spec};
 use crate::types::{
-    AppConfig, CursorStyle, KeybindConfigLine, TabCloseVisibility, TabTitleMode, TabTitleSource,
-    TabWidthMode, TerminalScrollbarStyle, TerminalScrollbarVisibility, ThemeId, WorkingDirFallback,
+    AppConfig, CursorStyle, KeybindConfigLine, PaneFocusEffect, TabCloseVisibility, TabTitleMode,
+    TabTitleSource, TabWidthMode, TerminalScrollbarStyle, TerminalScrollbarVisibility, ThemeId,
+    WorkingDirFallback,
 };
 
 impl AppConfig {
@@ -126,6 +127,38 @@ impl AppConfig {
                             value,
                             "a non-empty theme id",
                         );
+                    }
+                }
+                RootSettingId::TmuxEnabled => {
+                    if let Some(parsed) =
+                        parse_bool_field(&mut diagnostics, line_number, key, value)
+                    {
+                        config.tmux_enabled = parsed;
+                    }
+                }
+                RootSettingId::TmuxPersistence => {
+                    if let Some(parsed) =
+                        parse_bool_field(&mut diagnostics, line_number, key, value)
+                    {
+                        config.tmux_persistence = parsed;
+                    }
+                }
+                RootSettingId::TmuxBinary => {
+                    if let Some(parsed) = parse_string_field(
+                        &mut diagnostics,
+                        line_number,
+                        key,
+                        value,
+                        "a non-empty string",
+                    ) {
+                        config.tmux_binary = parsed;
+                    }
+                }
+                RootSettingId::TmuxShowActivePaneBorder => {
+                    if let Some(parsed) =
+                        parse_bool_field(&mut diagnostics, line_number, key, value)
+                    {
+                        config.tmux_show_active_pane_border = parsed;
                     }
                 }
                 RootSettingId::WorkingDir => {
@@ -437,6 +470,40 @@ impl AppConfig {
                         parse_usize_field(&mut diagnostics, line_number, key, value)
                     {
                         config.inactive_tab_scrollback = Some(parsed.min(MAX_SCROLLBACK_HISTORY));
+                    }
+                }
+                RootSettingId::PaneFocusEffect => {
+                    if let Some(parsed) = PaneFocusEffect::from_str(value) {
+                        config.pane_focus_effect = parsed;
+                    } else {
+                        push_invalid_value(
+                            &mut diagnostics,
+                            line_number,
+                            key,
+                            value,
+                            "one of: off, soft_spotlight, cinematic, minimal",
+                        );
+                    }
+                }
+                RootSettingId::PaneFocusStrength => {
+                    if let Some(parsed) = parse_f32_field(
+                        &mut diagnostics,
+                        line_number,
+                        key,
+                        value,
+                        "a number between 0.0 and 2.0",
+                    ) {
+                        if parsed.is_finite() {
+                            config.pane_focus_strength = parsed.clamp(0.0, MAX_PANE_FOCUS_STRENGTH);
+                        } else {
+                            push_invalid_value(
+                                &mut diagnostics,
+                                line_number,
+                                key,
+                                value,
+                                "a number between 0.0 and 2.0",
+                            );
+                        }
                     }
                 }
                 RootSettingId::CommandPaletteShowKeybinds => {

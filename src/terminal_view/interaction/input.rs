@@ -1,6 +1,19 @@
 use super::*;
 
 impl TerminalView {
+    fn send_input_to_active_pane(&self, input: &[u8]) -> bool {
+        match self.runtime_kind() {
+            RuntimeKind::Tmux => self.tmux_send_input_to_active_pane(input),
+            RuntimeKind::Native => {
+                let Some(terminal) = self.active_terminal() else {
+                    return false;
+                };
+                terminal.write_input(input);
+                true
+            }
+        }
+    }
+
     fn prepare_terminal_input_write(&mut self, cx: &mut Context<Self>) {
         self.terminal_scroll_accumulator_y = 0.0;
         self.input_scroll_suppress_until =
@@ -8,14 +21,17 @@ impl TerminalView {
         self.scroll_to_bottom(cx);
     }
 
-
     pub(in super::super) fn write_terminal_input(&mut self, input: &[u8], cx: &mut Context<Self>) {
         if input.is_empty() {
             return;
         }
 
         self.prepare_terminal_input_write(cx);
-        self.active_terminal().write(input);
+        if self.send_input_to_active_pane(input) {
+            if self.runtime_kind() == RuntimeKind::Tmux {
+                self.schedule_tmux_title_refresh();
+            }
+        }
     }
 
     fn sanitize_bracketed_paste_input(input: &[u8]) -> Option<Vec<u8>> {
@@ -53,23 +69,43 @@ impl TerminalView {
         sanitized
     }
 
+    fn framed_bracketed_paste_input(input: &[u8]) -> Vec<u8> {
+        const BRACKETED_PASTE_START: &[u8] = b"\x1b[200~";
+        const BRACKETED_PASTE_END: &[u8] = b"\x1b[201~";
+
+        let sanitized = Self::sanitize_bracketed_paste_input(input);
+        let payload = sanitized.as_deref().unwrap_or(input);
+
+        // Send one framed payload so start/content/end ordering is atomic and
+        // tmux can pick an efficient high-volume path for large pastes.
+        let mut framed =
+            Vec::with_capacity(BRACKETED_PASTE_START.len() + payload.len() + BRACKETED_PASTE_END.len());
+        framed.extend_from_slice(BRACKETED_PASTE_START);
+        framed.extend_from_slice(payload);
+        framed.extend_from_slice(BRACKETED_PASTE_END);
+        framed
+    }
+
     pub(in super::super) fn write_terminal_paste_input(&mut self, input: &[u8], cx: &mut Context<Self>) {
         if input.is_empty() {
             return;
         }
 
         self.prepare_terminal_input_write(cx);
-        let terminal = self.active_terminal();
-        if terminal.bracketed_paste_mode() {
-            terminal.write(b"\x1b[200~");
-            if let Some(sanitized) = Self::sanitize_bracketed_paste_input(input) {
-                terminal.write(&sanitized);
-            } else {
-                terminal.write(input);
-            }
-            terminal.write(b"\x1b[201~");
+        let bracketed_paste = self
+            .active_terminal()
+            .is_some_and(|terminal| terminal.bracketed_paste_mode());
+        let wrote_input = if bracketed_paste {
+            let framed = Self::framed_bracketed_paste_input(input);
+            self.send_input_to_active_pane(&framed)
         } else {
-            terminal.write(input);
+            self.send_input_to_active_pane(input)
+        };
+
+        if wrote_input {
+            if self.runtime_kind() == RuntimeKind::Tmux {
+                self.schedule_tmux_title_refresh();
+            }
         }
     }
 
@@ -119,7 +155,6 @@ impl TerminalView {
         }
     }
 
-
     pub(in super::super) fn handle_key_down(
         &mut self,
         event: &KeyDownEvent,
@@ -153,7 +188,9 @@ impl TerminalView {
             }
         }
 
-        let prompt_shortcuts_enabled = !self.active_terminal().alternate_screen_mode();
+        let prompt_shortcuts_enabled = !self
+            .active_terminal()
+            .is_some_and(|terminal| terminal.alternate_screen_mode());
         if let Some(input) = keystroke_to_input(&event.keystroke, prompt_shortcuts_enabled) {
             self.write_terminal_input(&input, cx);
             self.clear_selection();

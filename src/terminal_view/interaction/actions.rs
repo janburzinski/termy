@@ -1,9 +1,11 @@
 use super::*;
+use termy_command_core::{CommandCapabilities, CommandUnavailableReason};
 
 impl TerminalView {
     fn command_palette_mode_for_action(action: CommandAction) -> Option<CommandPaletteMode> {
         match action {
             CommandAction::SwitchTheme => Some(CommandPaletteMode::Themes),
+            CommandAction::ManageTmuxSessions => Some(CommandPaletteMode::TmuxSessions),
             _ => None,
         }
     }
@@ -19,6 +21,37 @@ impl TerminalView {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        // Keep runtime command gating aligned with command_core so every UI surface
+        // and execution path applies the same capability rules.
+        let availability = action.availability(CommandCapabilities {
+            tmux_runtime_active: self.runtime_uses_tmux(),
+            install_cli_available: self.install_cli_available(),
+        });
+        if !availability.enabled {
+            match availability.reason {
+                Some(CommandUnavailableReason::RequiresTmuxRuntime) => {
+                    termy_toast::info("Attach a tmux session to use this command");
+                    cx.notify();
+                    return;
+                }
+                Some(CommandUnavailableReason::InstallCliAlreadyInstalled) => {
+                    termy_toast::info("CLI is already installed");
+                    cx.notify();
+                    return;
+                }
+                _ => {
+                    log::warn!(
+                        "command reported unavailable without a known reason: action={:?} reason={:?}",
+                        action,
+                        availability.reason
+                    );
+                    termy_toast::info("Command unavailable");
+                    cx.notify();
+                    return;
+                }
+            }
+        }
+
         let shortcuts_suspended = respect_shortcut_suspend && self.command_shortcuts_suspended();
 
         match action {
@@ -34,6 +67,8 @@ impl TerminalView {
                     self.open_command_palette_in_mode(mode, cx);
                 }
             }
+            CommandAction::ManageTmuxSessions => self
+                .open_tmux_session_palette_with_intent(TmuxSessionIntent::AttachOrSwitch, cx),
             CommandAction::Quit => {
                 self.execute_quit_command_action(action, window, cx);
             }
@@ -52,10 +87,25 @@ impl TerminalView {
             CommandAction::RenameTab
             | CommandAction::NewTab
             | CommandAction::CloseTab
+            | CommandAction::ClosePaneOrTab
             | CommandAction::MoveTabLeft
             | CommandAction::MoveTabRight
             | CommandAction::SwitchTabLeft
-            | CommandAction::SwitchTabRight => {
+            | CommandAction::SwitchTabRight
+            | CommandAction::SplitPaneVertical
+            | CommandAction::SplitPaneHorizontal
+            | CommandAction::ClosePane
+            | CommandAction::FocusPaneLeft
+            | CommandAction::FocusPaneRight
+            | CommandAction::FocusPaneUp
+            | CommandAction::FocusPaneDown
+            | CommandAction::FocusPaneNext
+            | CommandAction::FocusPanePrevious
+            | CommandAction::ResizePaneLeft
+            | CommandAction::ResizePaneRight
+            | CommandAction::ResizePaneUp
+            | CommandAction::ResizePaneDown
+            | CommandAction::TogglePaneZoom => {
                 self.execute_tab_command_action(action, window, cx);
             }
             CommandAction::MinimizeWindow => {
@@ -171,6 +221,15 @@ impl TerminalView {
         self.execute_command_action(CommandAction::CloseTab, true, window, cx);
     }
 
+    pub(in super::super) fn handle_close_pane_or_tab_action(
+        &mut self,
+        _: &commands::ClosePaneOrTab,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.execute_command_action(CommandAction::ClosePaneOrTab, true, window, cx);
+    }
+
     pub(in super::super) fn handle_move_tab_left_action(
         &mut self,
         _: &commands::MoveTabLeft,
@@ -205,6 +264,141 @@ impl TerminalView {
         cx: &mut Context<Self>,
     ) {
         self.execute_command_action(CommandAction::SwitchTabRight, true, window, cx);
+    }
+
+    pub(in super::super) fn handle_manage_tmux_sessions_action(
+        &mut self,
+        _: &commands::ManageTmuxSessions,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.execute_command_action(CommandAction::ManageTmuxSessions, true, window, cx);
+    }
+
+    pub(in super::super) fn handle_split_pane_vertical_action(
+        &mut self,
+        _: &commands::SplitPaneVertical,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.execute_command_action(CommandAction::SplitPaneVertical, true, window, cx);
+    }
+
+    pub(in super::super) fn handle_split_pane_horizontal_action(
+        &mut self,
+        _: &commands::SplitPaneHorizontal,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.execute_command_action(CommandAction::SplitPaneHorizontal, true, window, cx);
+    }
+
+    pub(in super::super) fn handle_close_pane_action(
+        &mut self,
+        _: &commands::ClosePane,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.execute_command_action(CommandAction::ClosePane, true, window, cx);
+    }
+
+    pub(in super::super) fn handle_focus_pane_left_action(
+        &mut self,
+        _: &commands::FocusPaneLeft,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.execute_command_action(CommandAction::FocusPaneLeft, true, window, cx);
+    }
+
+    pub(in super::super) fn handle_focus_pane_right_action(
+        &mut self,
+        _: &commands::FocusPaneRight,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.execute_command_action(CommandAction::FocusPaneRight, true, window, cx);
+    }
+
+    pub(in super::super) fn handle_focus_pane_up_action(
+        &mut self,
+        _: &commands::FocusPaneUp,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.execute_command_action(CommandAction::FocusPaneUp, true, window, cx);
+    }
+
+    pub(in super::super) fn handle_focus_pane_down_action(
+        &mut self,
+        _: &commands::FocusPaneDown,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.execute_command_action(CommandAction::FocusPaneDown, true, window, cx);
+    }
+
+    pub(in super::super) fn handle_focus_pane_next_action(
+        &mut self,
+        _: &commands::FocusPaneNext,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.execute_command_action(CommandAction::FocusPaneNext, true, window, cx);
+    }
+
+    pub(in super::super) fn handle_focus_pane_previous_action(
+        &mut self,
+        _: &commands::FocusPanePrevious,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.execute_command_action(CommandAction::FocusPanePrevious, true, window, cx);
+    }
+
+    pub(in super::super) fn handle_resize_pane_left_action(
+        &mut self,
+        _: &commands::ResizePaneLeft,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.execute_command_action(CommandAction::ResizePaneLeft, true, window, cx);
+    }
+
+    pub(in super::super) fn handle_resize_pane_right_action(
+        &mut self,
+        _: &commands::ResizePaneRight,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.execute_command_action(CommandAction::ResizePaneRight, true, window, cx);
+    }
+
+    pub(in super::super) fn handle_resize_pane_up_action(
+        &mut self,
+        _: &commands::ResizePaneUp,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.execute_command_action(CommandAction::ResizePaneUp, true, window, cx);
+    }
+
+    pub(in super::super) fn handle_resize_pane_down_action(
+        &mut self,
+        _: &commands::ResizePaneDown,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.execute_command_action(CommandAction::ResizePaneDown, true, window, cx);
+    }
+
+    pub(in super::super) fn handle_toggle_pane_zoom_action(
+        &mut self,
+        _: &commands::TogglePaneZoom,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.execute_command_action(CommandAction::TogglePaneZoom, true, window, cx);
     }
 
     pub(in super::super) fn handle_minimize_window_action(
@@ -343,6 +537,10 @@ mod tests {
         assert_eq!(
             TerminalView::command_palette_mode_for_action(CommandAction::SwitchTheme),
             Some(CommandPaletteMode::Themes)
+        );
+        assert_eq!(
+            TerminalView::command_palette_mode_for_action(CommandAction::ManageTmuxSessions),
+            Some(CommandPaletteMode::TmuxSessions)
         );
         assert_eq!(
             TerminalView::command_palette_mode_for_action(CommandAction::OpenConfig),

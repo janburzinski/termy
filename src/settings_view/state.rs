@@ -2,6 +2,7 @@ use super::*;
 
 const MAX_THEME_SUGGESTIONS: usize = 16;
 const MAX_FONT_SUGGESTIONS: usize = 200;
+const PANE_FOCUS_MAX: f32 = 2.0;
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub(super) enum EditableField {
@@ -14,12 +15,15 @@ pub(super) enum EditableField {
     Shell,
     Term,
     Colorterm,
+    TmuxBinary,
     ScrollbackHistory,
     InactiveTabScrollback,
     ScrollMultiplier,
     CursorStyle,
     ScrollbarVisibility,
     ScrollbarStyle,
+    PaneFocusEffect,
+    PaneFocusStrength,
     TabFallbackTitle,
     TabTitlePriority,
     TabTitleMode,
@@ -193,6 +197,10 @@ impl SettingsWindow {
             RootSettingId::PaddingY,
         ];
         const TERMINAL_SETTINGS: &[RootSettingId] = &[
+            RootSettingId::TmuxEnabled,
+            RootSettingId::TmuxPersistence,
+            RootSettingId::TmuxShowActivePaneBorder,
+            RootSettingId::TmuxBinary,
             RootSettingId::CursorBlink,
             RootSettingId::CursorStyle,
             RootSettingId::Shell,
@@ -203,6 +211,8 @@ impl SettingsWindow {
             RootSettingId::MouseScrollMultiplier,
             RootSettingId::ScrollbarVisibility,
             RootSettingId::ScrollbarStyle,
+            RootSettingId::PaneFocusEffect,
+            RootSettingId::PaneFocusStrength,
             RootSettingId::CommandPaletteShowKeybinds,
         ];
         const TABS_SETTINGS: &[RootSettingId] = &[
@@ -333,12 +343,15 @@ impl SettingsWindow {
             EditableField::Shell
             | EditableField::Term
             | EditableField::Colorterm
+            | EditableField::TmuxBinary
             | EditableField::ScrollbackHistory
             | EditableField::InactiveTabScrollback
             | EditableField::ScrollMultiplier
             | EditableField::CursorStyle
             | EditableField::ScrollbarVisibility
-            | EditableField::ScrollbarStyle => Self::terminal_field_spec(field),
+            | EditableField::ScrollbarStyle
+            | EditableField::PaneFocusEffect
+            | EditableField::PaneFocusStrength => Self::terminal_field_spec(field),
             EditableField::TabFallbackTitle
             | EditableField::TabTitlePriority
             | EditableField::TabTitleMode
@@ -406,7 +419,12 @@ impl SettingsWindow {
         match field {
             EditableField::Shell => Self::text_field_spec(Some(RootSettingId::Shell)),
             EditableField::Term => Self::text_field_spec(Some(RootSettingId::Term)),
-            EditableField::Colorterm => Self::text_field_spec(Some(RootSettingId::Colorterm)),
+            EditableField::Colorterm => {
+                Self::text_field_spec(Some(RootSettingId::Colorterm))
+            }
+            EditableField::TmuxBinary => {
+                Self::text_field_spec(Some(RootSettingId::TmuxBinary))
+            }
             EditableField::ScrollbackHistory => Self::numeric_field_spec(
                 RootSettingId::ScrollbackHistory,
                 NumericStepSpec { delta: 100.0, min: 0.0, max: 100_000.0 },
@@ -422,6 +440,17 @@ impl SettingsWindow {
             EditableField::CursorStyle => Self::enum_field_spec(RootSettingId::CursorStyle),
             EditableField::ScrollbarVisibility => Self::enum_field_spec(RootSettingId::ScrollbarVisibility),
             EditableField::ScrollbarStyle => Self::enum_field_spec(RootSettingId::ScrollbarStyle),
+            EditableField::PaneFocusEffect => {
+                Self::enum_field_spec(RootSettingId::PaneFocusEffect)
+            }
+            EditableField::PaneFocusStrength => Self::numeric_field_spec(
+                RootSettingId::PaneFocusStrength,
+                NumericStepSpec {
+                    delta: 0.05,
+                    min: 0.0,
+                    max: PANE_FOCUS_MAX,
+                },
+            ),
             _ => unreachable!("invalid terminal field"),
         }
     }
@@ -682,6 +711,7 @@ impl SettingsWindow {
             EditableField::Shell => self.config.shell.clone().unwrap_or_default(),
             EditableField::Term => self.config.term.clone(),
             EditableField::Colorterm => self.config.colorterm.clone().unwrap_or_default(),
+            EditableField::TmuxBinary => self.config.tmux_binary.clone(),
             EditableField::ScrollbackHistory => self.config.scrollback_history.to_string(),
             EditableField::InactiveTabScrollback => self
                 .config
@@ -712,6 +742,14 @@ impl SettingsWindow {
                 }
                 .to_string()
             }
+            EditableField::PaneFocusEffect => match self.config.pane_focus_effect {
+                termy_config_core::PaneFocusEffect::Off => "off",
+                termy_config_core::PaneFocusEffect::SoftSpotlight => "soft_spotlight",
+                termy_config_core::PaneFocusEffect::Cinematic => "cinematic",
+                termy_config_core::PaneFocusEffect::Minimal => "minimal",
+            }
+            .to_string(),
+            EditableField::PaneFocusStrength => format!("{}", self.pane_focus_strength_display_percent()),
             EditableField::TabFallbackTitle => self.config.tab_title.fallback.clone(),
             EditableField::TabTitlePriority => self
                 .config
@@ -761,6 +799,13 @@ impl SettingsWindow {
                 .map(|rgb| format!("#{:02x}{:02x}{:02x}", rgb.r, rgb.g, rgb.b))
                 .unwrap_or_default(),
         }
+    }
+
+    pub(super) fn pane_focus_strength_display_percent(&self) -> i32 {
+        // Normalize internal 0.0..=PANE_FOCUS_MAX strength to a cleaner 0..=100 UI scale
+        // without changing the stored value range or step behavior.
+        ((self.config.pane_focus_strength.clamp(0.0, PANE_FOCUS_MAX) / PANE_FOCUS_MAX) * 100.0)
+            .round() as i32
     }
 
 
@@ -836,6 +881,15 @@ impl SettingsWindow {
                 self.config.mouse_scroll_multiplier = next;
                 config::set_root_setting(
                     termy_config_core::RootSettingId::MouseScrollMultiplier,
+                    &format!("{:.3}", next),
+                )
+            }
+            EditableField::PaneFocusStrength => {
+                let next =
+                    (self.config.pane_focus_strength + (delta as f32 * step.delta)).clamp(step.min, step.max);
+                self.config.pane_focus_strength = next;
+                config::set_root_setting(
+                    termy_config_core::RootSettingId::PaneFocusStrength,
                     &format!("{:.3}", next),
                 )
             }
@@ -970,12 +1024,15 @@ mod tests {
             EditableField::Shell,
             EditableField::Term,
             EditableField::Colorterm,
+            EditableField::TmuxBinary,
             EditableField::ScrollbackHistory,
             EditableField::InactiveTabScrollback,
             EditableField::ScrollMultiplier,
             EditableField::CursorStyle,
             EditableField::ScrollbarVisibility,
             EditableField::ScrollbarStyle,
+            EditableField::PaneFocusEffect,
+            EditableField::PaneFocusStrength,
             EditableField::TabFallbackTitle,
             EditableField::TabTitlePriority,
             EditableField::TabTitleMode,
@@ -1008,6 +1065,7 @@ mod tests {
             EditableField::CursorStyle,
             EditableField::ScrollbarVisibility,
             EditableField::ScrollbarStyle,
+            EditableField::PaneFocusEffect,
             EditableField::TabTitleMode,
             EditableField::TabCloseVisibility,
             EditableField::TabWidthMode,
@@ -1031,6 +1089,7 @@ mod tests {
             EditableField::ScrollbackHistory,
             EditableField::InactiveTabScrollback,
             EditableField::ScrollMultiplier,
+            EditableField::PaneFocusStrength,
             EditableField::WindowWidth,
             EditableField::WindowHeight,
         ];

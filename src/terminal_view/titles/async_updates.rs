@@ -54,10 +54,19 @@ impl TerminalView {
         .detach();
     }
 
+    fn index_for_tab_id(&self, tab_id: TabId) -> Option<usize> {
+        Self::tab_index_for_id_in_order(self.tabs.iter().map(|tab| tab.id), tab_id)
+    }
+
+    fn tab_index_for_id_in_order<I>(ids: I, tab_id: TabId) -> Option<usize>
+    where
+        I: IntoIterator<Item = TabId>,
+    {
+        ids.into_iter().position(|id| id == tab_id)
+    }
+
     fn activate_pending_command_title_for_id(&mut self, tab_id: TabId, token: u64) -> bool {
-        let Some(index) =
-            Self::tab_index_for_id_in_order(self.tabs.iter().map(|tab| tab.id), tab_id)
-        else {
+        let Some(index) = self.index_for_tab_id(tab_id) else {
             return false;
         };
 

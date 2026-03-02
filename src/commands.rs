@@ -1,5 +1,5 @@
 use gpui::{FocusHandle, KeyBinding, MenuItem, OsAction, Window, actions};
-use termy_command_core::CommandId;
+use termy_command_core::{CommandAvailability, CommandCapabilities, CommandId};
 
 const GLOBAL_CONTEXT: Option<&str> = None;
 const TERMINAL_CONTEXT: Option<&str> = Some("Terminal");
@@ -255,7 +255,15 @@ macro_rules! define_commands {
                     });
                 }
 
+                // Keep menu section ordering deterministic even when command specs are grouped
+                // by action families instead of menu layout.
+                entries.sort_by_key(|entry| entry.section);
+
                 entries
+            }
+
+            pub fn availability(self, caps: CommandCapabilities) -> CommandAvailability {
+                self.to_command_id().availability(caps)
             }
 
             pub fn to_menu_item(self, title: &'static str, role: MenuActionRole) -> MenuItem {
@@ -342,15 +350,21 @@ define_commands!(
     (
         CloseTab,
         TERMINAL_CONTEXT,
+        None,
+        None
+    ),
+    (
+        ClosePaneOrTab,
+        TERMINAL_CONTEXT,
         Some(palette(
-            "Close Tab",
-            "remove tab",
+            "Close Pane or Tab",
+            "close pane tab remove",
             CommandPaletteVisibility::Always
         )),
         Some(menu(
             MenuRoot::File,
-            0,
-            "Close Tab",
+            1,
+            "Close Pane or Tab",
             MenuVisibility::Always,
             MenuActionRole::Normal
         ))
@@ -420,6 +434,186 @@ define_commands!(
         ))
     ),
     (
+        ManageTmuxSessions,
+        TERMINAL_CONTEXT,
+        Some(palette(
+            "Tmux Sessions",
+            "tmux sessions attach switch create manage",
+            CommandPaletteVisibility::Always
+        )),
+        Some(menu(
+            MenuRoot::File,
+            1,
+            "Tmux Sessions",
+            MenuVisibility::Always,
+            MenuActionRole::Normal
+        ))
+    ),
+    (
+        SplitPaneVertical,
+        TERMINAL_CONTEXT,
+        Some(palette(
+            "Split Pane Vertical",
+            "split pane vertical right",
+            CommandPaletteVisibility::Always
+        )),
+        Some(menu(
+            MenuRoot::File,
+            1,
+            "Split Pane Vertical",
+            MenuVisibility::Always,
+            MenuActionRole::Normal
+        ))
+    ),
+    (
+        SplitPaneHorizontal,
+        TERMINAL_CONTEXT,
+        Some(palette(
+            "Split Pane Horizontal",
+            "split pane horizontal down",
+            CommandPaletteVisibility::Always
+        )),
+        Some(menu(
+            MenuRoot::File,
+            1,
+            "Split Pane Horizontal",
+            MenuVisibility::Always,
+            MenuActionRole::Normal
+        ))
+    ),
+    (
+        ClosePane,
+        TERMINAL_CONTEXT,
+        Some(palette(
+            "Close Pane",
+            "kill close pane",
+            CommandPaletteVisibility::Always
+        )),
+        None
+    ),
+    (
+        FocusPaneLeft,
+        TERMINAL_CONTEXT,
+        Some(palette(
+            "Focus Pane Left",
+            "focus pane left",
+            CommandPaletteVisibility::Always
+        )),
+        None
+    ),
+    (
+        FocusPaneRight,
+        TERMINAL_CONTEXT,
+        Some(palette(
+            "Focus Pane Right",
+            "focus pane right",
+            CommandPaletteVisibility::Always
+        )),
+        None
+    ),
+    (
+        FocusPaneUp,
+        TERMINAL_CONTEXT,
+        Some(palette(
+            "Focus Pane Up",
+            "focus pane up",
+            CommandPaletteVisibility::Always
+        )),
+        None
+    ),
+    (
+        FocusPaneDown,
+        TERMINAL_CONTEXT,
+        Some(palette(
+            "Focus Pane Down",
+            "focus pane down",
+            CommandPaletteVisibility::Always
+        )),
+        None
+    ),
+    (
+        FocusPaneNext,
+        TERMINAL_CONTEXT,
+        Some(palette(
+            "Focus Next Pane",
+            "focus pane next cycle",
+            CommandPaletteVisibility::Always
+        )),
+        Some(menu(
+            MenuRoot::File,
+            1,
+            "Focus Next Pane",
+            MenuVisibility::Always,
+            MenuActionRole::Normal
+        ))
+    ),
+    (
+        FocusPanePrevious,
+        TERMINAL_CONTEXT,
+        Some(palette(
+            "Focus Previous Pane",
+            "focus pane previous cycle",
+            CommandPaletteVisibility::Always
+        )),
+        None
+    ),
+    (
+        ResizePaneLeft,
+        TERMINAL_CONTEXT,
+        Some(palette(
+            "Resize Pane Left",
+            "resize pane left",
+            CommandPaletteVisibility::Always
+        )),
+        None
+    ),
+    (
+        ResizePaneRight,
+        TERMINAL_CONTEXT,
+        Some(palette(
+            "Resize Pane Right",
+            "resize pane right",
+            CommandPaletteVisibility::Always
+        )),
+        None
+    ),
+    (
+        ResizePaneUp,
+        TERMINAL_CONTEXT,
+        Some(palette(
+            "Resize Pane Up",
+            "resize pane up",
+            CommandPaletteVisibility::Always
+        )),
+        None
+    ),
+    (
+        ResizePaneDown,
+        TERMINAL_CONTEXT,
+        Some(palette(
+            "Resize Pane Down",
+            "resize pane down",
+            CommandPaletteVisibility::Always
+        )),
+        None
+    ),
+    (
+        TogglePaneZoom,
+        TERMINAL_CONTEXT,
+        Some(palette(
+            "Toggle Pane Zoom",
+            "zoom pane maximize",
+            CommandPaletteVisibility::Always
+        )),
+        Some(menu(
+            MenuRoot::View,
+            1,
+            "Toggle Pane Zoom",
+            MenuVisibility::Always,
+            MenuActionRole::Normal
+        ))
+    ),
+    (
         MinimizeWindow,
         TERMINAL_CONTEXT,
         None,
@@ -484,22 +678,6 @@ define_commands!(
         None
     ),
     (
-        OpenConfig,
-        GLOBAL_CONTEXT,
-        Some(palette(
-            "Open Settings File",
-            "settings file config edit",
-            CommandPaletteVisibility::Always
-        )),
-        Some(menu(
-            MenuRoot::App,
-            1,
-            "Open Config File...",
-            MenuVisibility::Always,
-            MenuActionRole::Normal
-        ))
-    ),
-    (
         OpenSettings,
         GLOBAL_CONTEXT,
         Some(palette(
@@ -511,6 +689,22 @@ define_commands!(
             MenuRoot::App,
             1,
             "Settings...",
+            MenuVisibility::Always,
+            MenuActionRole::Normal
+        ))
+    ),
+    (
+        OpenConfig,
+        GLOBAL_CONTEXT,
+        Some(palette(
+            "Open Settings File",
+            "settings file config edit",
+            CommandPaletteVisibility::Always
+        )),
+        Some(menu(
+            MenuRoot::App,
+            1,
+            "Open Config File...",
             MenuVisibility::Always,
             MenuActionRole::Normal
         ))
@@ -778,7 +972,7 @@ pub fn inline_input_keybindings() -> Vec<KeyBinding> {
 mod tests {
     use super::{CommandAction, MenuActionRole, MenuRoot, MenuVisibility};
     use std::collections::HashSet;
-    use termy_command_core::CommandId;
+    use termy_command_core::{CommandCapabilities, CommandId, CommandUnavailableReason};
 
     #[test]
     fn command_catalog_contains_unique_actions() {
@@ -814,7 +1008,7 @@ mod tests {
         assert!(
             entries
                 .iter()
-                .any(|entry| entry.action == CommandAction::CloseTab)
+                .any(|entry| entry.action == CommandAction::ClosePaneOrTab)
         );
         assert!(
             entries
@@ -841,6 +1035,67 @@ mod tests {
                 .iter()
                 .any(|entry| entry.action == CommandAction::RenameTab)
         );
+        assert!(
+            !entries
+                .iter()
+                .any(|entry| entry.action == CommandAction::CloseTab)
+        );
+    }
+
+    #[test]
+    fn file_menu_includes_requested_pane_actions() {
+        let file_entries = CommandAction::menu_entries_for_root(MenuRoot::File);
+
+        for action in [
+            CommandAction::ClosePaneOrTab,
+            CommandAction::SplitPaneVertical,
+            CommandAction::SplitPaneHorizontal,
+            CommandAction::FocusPaneNext,
+        ] {
+            assert!(
+                file_entries.iter().any(|entry| entry.action == action),
+                "missing {action:?} from File menu"
+            );
+        }
+
+        let close_pane_or_tab = file_entries
+            .iter()
+            .find(|entry| entry.action == CommandAction::ClosePaneOrTab)
+            .expect("missing ClosePaneOrTab from File menu");
+        assert_eq!(close_pane_or_tab.section, 1);
+        assert!(
+            !file_entries
+                .iter()
+                .any(|entry| entry.action == CommandAction::ClosePane)
+        );
+    }
+
+    #[test]
+    fn window_menu_excludes_file_menu_pane_actions() {
+        let window_entries = CommandAction::menu_entries_for_root(MenuRoot::Window);
+        for action in [
+            CommandAction::ClosePaneOrTab,
+            CommandAction::SplitPaneVertical,
+            CommandAction::SplitPaneHorizontal,
+            CommandAction::ClosePane,
+            CommandAction::FocusPaneNext,
+            CommandAction::FocusPanePrevious,
+        ] {
+            assert!(
+                !window_entries.iter().any(|entry| entry.action == action),
+                "unexpected {action:?} in Window menu"
+            );
+        }
+    }
+
+    #[test]
+    fn file_menu_section_order_is_stable() {
+        let file_entries = CommandAction::menu_entries_for_root(MenuRoot::File);
+        let sections = file_entries
+            .iter()
+            .map(|entry| entry.section)
+            .collect::<Vec<_>>();
+        assert_eq!(sections, [0, 0, 1, 1, 1, 1, 1]);
     }
 
     #[test]
@@ -904,6 +1159,20 @@ mod tests {
     }
 
     #[test]
+    fn command_action_availability_reason_matches_command_core() {
+        let caps = CommandCapabilities {
+            tmux_runtime_active: false,
+            install_cli_available: true,
+        };
+        let availability = CommandAction::SplitPaneVertical.availability(caps);
+        assert!(!availability.enabled);
+        assert_eq!(
+            availability.reason,
+            Some(CommandUnavailableReason::RequiresTmuxRuntime)
+        );
+    }
+
+    #[test]
     fn menu_roots_are_stable_and_ordered() {
         assert_eq!(
             CommandAction::menu_roots(),
@@ -916,5 +1185,34 @@ mod tests {
                 MenuRoot::Help,
             ]
         );
+    }
+
+    #[test]
+    fn tmux_only_actions_match_command_core_tmux_only_set() {
+        let mut actual = CommandAction::all()
+            .filter(|action| action.to_command_id().is_tmux_only())
+            .map(|action| action.to_command_id().config_name())
+            .collect::<Vec<_>>();
+        actual.sort_unstable();
+
+        let mut expected = vec![
+            "split_pane_vertical",
+            "split_pane_horizontal",
+            "close_pane",
+            "focus_pane_left",
+            "focus_pane_right",
+            "focus_pane_up",
+            "focus_pane_down",
+            "focus_pane_next",
+            "focus_pane_previous",
+            "resize_pane_left",
+            "resize_pane_right",
+            "resize_pane_up",
+            "resize_pane_down",
+            "toggle_pane_zoom",
+        ];
+        expected.sort_unstable();
+
+        assert_eq!(actual, expected);
     }
 }

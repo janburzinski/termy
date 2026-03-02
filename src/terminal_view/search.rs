@@ -102,8 +102,9 @@ impl TerminalView {
             return;
         };
 
-        let active_tab = self.active_tab;
-        let terminal = &self.tabs[active_tab].terminal;
+        let Some(terminal) = self.active_terminal() else {
+            return;
+        };
         let size = terminal.size();
         let rows = size.rows as i32;
 
@@ -134,7 +135,7 @@ impl TerminalView {
         let delta = target_offset as i32 - display_offset as i32;
 
         if delta != 0 {
-            self.active_terminal().scroll_display(delta);
+            terminal.scroll_display(delta);
             self.mark_terminal_scrollbar_activity(cx);
         }
     }
@@ -149,23 +150,21 @@ impl TerminalView {
             return;
         }
 
-        let active_tab = self.active_tab;
-        let terminal = &self.tabs[active_tab].terminal;
-        let (display_offset, history_size) = terminal.scroll_state();
+        let Some(terminal) = self.active_terminal() else {
+            self.search_state.clear_results_preserving_query();
+            self.clear_terminal_scrollbar_marker_cache();
+            return;
+        };
+        let (_, history_size) = terminal.scroll_state();
         let rows = terminal.size().rows as i32;
-
-        // Search range: from deepest history to current viewport
         let start_line = -(history_size as i32);
         let end_line = rows - 1;
-        let search_state = &mut self.search_state;
+        let line_texts = collect_search_line_texts(terminal, start_line, end_line);
 
-        // Search directly against terminal grid lines to avoid duplicating
-        // the entire visible + scrollback range in a temporary map.
-        terminal.with_term(|term| {
-            let grid = term.grid();
-            search_state.search(start_line, end_line, |line_idx| {
-                extract_line_text(grid, line_idx, display_offset)
-            });
+        let search_state = &mut self.search_state;
+        search_state.search(start_line, end_line, |line_idx| {
+            let offset = (line_idx - start_line) as usize;
+            line_texts.get(offset).and_then(|line| line.as_deref())
         });
 
         // Start from the bottommost (newest) match, which is now index 0.
@@ -378,11 +377,24 @@ impl TerminalView {
     }
 }
 
+fn collect_search_line_texts(
+    terminal: &Terminal,
+    start_line: i32,
+    end_line: i32,
+) -> Vec<Option<String>> {
+    let mut line_texts = Vec::with_capacity((end_line - start_line + 1).max(0) as usize);
+    let _ = terminal.with_grid(|grid| {
+        for line_idx in start_line..=end_line {
+            line_texts.push(extract_line_text(grid, line_idx));
+        }
+    });
+    line_texts
+}
+
 /// Extract text from a terminal grid line
 fn extract_line_text(
     grid: &alacritty_terminal::grid::Grid<alacritty_terminal::term::cell::Cell>,
     line_idx: i32,
-    _display_offset: usize,
 ) -> Option<String> {
     use alacritty_terminal::index::{Column, Line};
 
@@ -411,4 +423,49 @@ fn extract_line_text(
     }
 
     Some(text)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use termy_terminal_ui::TerminalSize;
+
+    fn filled_line_count(lines: &[Option<String>]) -> usize {
+        lines
+            .iter()
+            .filter_map(|line| line.as_deref())
+            .filter(|line| !line.trim().is_empty())
+            .count()
+    }
+
+    #[test]
+    fn terminal_read_adapter_extracts_lines_for_both_runtime_variants() {
+        let size = TerminalSize {
+            cols: 24,
+            rows: 4,
+            ..TerminalSize::default()
+        };
+
+        let tmux = Terminal::new_tmux(size, 256);
+        tmux.feed_output(b"tmux-line\r\n");
+        let tmux_lines = collect_search_line_texts(&tmux, 0, i32::from(size.rows) - 1);
+        assert_eq!(tmux_lines.len(), usize::from(size.rows));
+        assert!(
+            filled_line_count(&tmux_lines) >= 1,
+            "tmux terminal should expose at least one non-empty line"
+        );
+
+        let native = Terminal::new_native(size, None, None, None, None)
+            .expect("native terminal should initialize for read adapter test");
+        let native_lines = collect_search_line_texts(&native, 0, i32::from(size.rows) - 1);
+        assert_eq!(native_lines.len(), usize::from(size.rows));
+        let native_has_non_empty_buffer = native_lines
+            .iter()
+            .filter_map(|line| line.as_deref())
+            .any(|line| !line.is_empty());
+        assert!(
+            native_has_non_empty_buffer,
+            "native terminal read adapter should expose at least one non-empty line buffer"
+        );
+    }
 }

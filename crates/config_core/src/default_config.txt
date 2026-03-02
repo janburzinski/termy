@@ -1,6 +1,14 @@
 # Main settings
 # Current color scheme name
 theme = termy
+# Enable tmux runtime integration
+tmux_enabled = false
+# Reuse tmux tabs and panes across app restarts
+tmux_persistence = true
+# tmux executable path or binary name
+tmux_binary = tmux
+# Show active tmux pane border highlight in managed sessions
+tmux_show_active_pane_border = false
 # Initial directory for new sessions
 # working_dir = none
 # Directory used when working_dir is unset
@@ -28,7 +36,7 @@ tab_width_mode = active_grow_sticky
 # Show or hide the termy branding in the titlebar
 show_termy_in_titlebar = true
 # Executable used for new sessions
-# shell = none
+shell = none
 # TERM value exposed to child applications
 term = xterm-256color
 # COLORTERM value exposed to child applications
@@ -63,14 +71,20 @@ scrollbar_style = neutral
 scrollback_history = 2000
 # Scrollback limit for inactive tabs
 # inactive_tab_scrollback = none
+# How inactive panes are visually dimmed when a pane is active
+pane_focus_effect = soft_spotlight
+# Strength of active pane emphasis (0.0 to 2.0)
+pane_focus_strength = 0.6
 # Show shortcut badges in command palette rows
 command_palette_show_keybinds = true
 
 # Keybindings (repeatable)
+# tmux-only keybind actions require an active tmux session
 # keybind = cmd-p=toggle_command_palette
 # keybind = cmd-c=copy
 # keybind = cmd-c=unbind
 # keybind = clear
+# keybind = secondary-d=split_pane_vertical
 
 # Color overrides
 [colors]

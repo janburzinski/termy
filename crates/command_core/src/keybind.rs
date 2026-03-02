@@ -66,7 +66,55 @@ pub fn default_keybinds_for_platform(platform: KeybindPlatform) -> Vec<DefaultKe
         },
         DefaultKeybind {
             trigger: "secondary-w",
-            action: CommandId::CloseTab,
+            action: CommandId::ClosePaneOrTab,
+        },
+        DefaultKeybind {
+            trigger: "secondary-d",
+            action: CommandId::SplitPaneVertical,
+        },
+        DefaultKeybind {
+            trigger: "secondary-shift-d",
+            action: CommandId::SplitPaneHorizontal,
+        },
+        DefaultKeybind {
+            trigger: "secondary-o",
+            action: CommandId::FocusPaneNext,
+        },
+        DefaultKeybind {
+            trigger: "secondary-alt-left",
+            action: CommandId::FocusPaneLeft,
+        },
+        DefaultKeybind {
+            trigger: "secondary-alt-right",
+            action: CommandId::FocusPaneRight,
+        },
+        DefaultKeybind {
+            trigger: "secondary-alt-up",
+            action: CommandId::FocusPaneUp,
+        },
+        DefaultKeybind {
+            trigger: "secondary-alt-down",
+            action: CommandId::FocusPaneDown,
+        },
+        DefaultKeybind {
+            trigger: "secondary-alt-shift-left",
+            action: CommandId::ResizePaneLeft,
+        },
+        DefaultKeybind {
+            trigger: "secondary-alt-shift-right",
+            action: CommandId::ResizePaneRight,
+        },
+        DefaultKeybind {
+            trigger: "secondary-alt-shift-up",
+            action: CommandId::ResizePaneUp,
+        },
+        DefaultKeybind {
+            trigger: "secondary-alt-shift-down",
+            action: CommandId::ResizePaneDown,
+        },
+        DefaultKeybind {
+            trigger: "secondary-enter",
+            action: CommandId::TogglePaneZoom,
         },
         DefaultKeybind {
             trigger: "secondary-=",
@@ -378,6 +426,67 @@ mod tests {
                 .any(|binding| binding.trigger == "secondary-,"
                     && binding.action == CommandId::OpenSettings)
         );
+    }
+
+    #[test]
+    fn default_keybinds_close_pane_or_tab_on_secondary_w() {
+        for platform in KeybindPlatform::ALL {
+            let defaults = default_keybinds_for_platform(platform);
+            assert!(
+                defaults.iter().any(|binding| {
+                    binding.trigger == "secondary-w"
+                        && binding.action == CommandId::ClosePaneOrTab
+                }),
+                "missing secondary-w -> close_pane_or_tab on {}",
+                platform.as_str()
+            );
+        }
+    }
+
+    #[test]
+    fn default_keybinds_include_requested_pane_shortcuts() {
+        for platform in KeybindPlatform::ALL {
+            let defaults = default_keybinds_for_platform(platform);
+            assert!(
+                defaults.iter().any(|binding| {
+                    binding.trigger == "secondary-d"
+                        && binding.action == CommandId::SplitPaneVertical
+                }),
+                "missing secondary-d -> split_pane_vertical on {}",
+                platform.as_str()
+            );
+            assert!(
+                defaults.iter().any(|binding| {
+                    binding.trigger == "secondary-shift-d"
+                        && binding.action == CommandId::SplitPaneHorizontal
+                }),
+                "missing secondary-shift-d -> split_pane_horizontal on {}",
+                platform.as_str()
+            );
+            assert!(
+                defaults.iter().any(|binding| {
+                    binding.trigger == "secondary-o"
+                        && binding.action == CommandId::FocusPaneNext
+                }),
+                "missing secondary-o -> focus_pane_next on {}",
+                platform.as_str()
+            );
+        }
+    }
+
+    #[test]
+    fn default_keybinds_do_not_include_secondary_shift_w_close_pane() {
+        for platform in KeybindPlatform::ALL {
+            let defaults = default_keybinds_for_platform(platform);
+            assert!(
+                !defaults.iter().any(|binding| {
+                    binding.trigger == "secondary-shift-w"
+                        && binding.action == CommandId::ClosePane
+                }),
+                "unexpected secondary-shift-w -> close_pane on {}",
+                platform.as_str()
+            );
+        }
     }
 
     #[test]

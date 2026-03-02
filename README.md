@@ -57,6 +57,8 @@ Run the installer and follow the setup wizard.
 cargo run --release
 ```
 
+Developer tests: see [docs/development.md](docs/development.md).
+
 ## Configuration
 
 Config file: `~/.config/termy/config.txt`

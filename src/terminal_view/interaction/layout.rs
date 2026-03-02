@@ -1,6 +1,32 @@
 use super::*;
 
 impl TerminalView {
+    fn should_emit_tmux_resize_error_toast(&mut self, now: Instant) -> bool {
+        let debounce_window = Duration::from_millis(TMUX_RESIZE_ERROR_TOAST_DEBOUNCE_MS);
+        match self.last_tmux_resize_error_at {
+            Some(previous) if now.saturating_duration_since(previous) < debounce_window => false,
+            _ => {
+                self.last_tmux_resize_error_at = Some(now);
+                true
+            }
+        }
+    }
+
+    pub(in super::super) fn terminal_content_position(
+        &self,
+        position: gpui::Point<Pixels>,
+    ) -> (f32, f32) {
+        let x: f32 = position.x.into();
+        let y: f32 = position.y.into();
+        // Mouse coordinates arrive in window space; subtract chrome so terminal hit-testing
+        // stays aligned with rendered rows in both native and tmux runtimes.
+        (x, Self::window_y_to_terminal_content_y(y, self.chrome_height()))
+    }
+
+    pub(in super::super) fn window_y_to_terminal_content_y(window_y: f32, chrome_height: f32) -> f32 {
+        window_y - chrome_height
+    }
+
     pub(in super::super) fn execute_layout_command_action(
         &mut self,
         action: CommandAction,
@@ -83,9 +109,11 @@ impl TerminalView {
         let terminal_width = (viewport_width - (padding_x * 2.0)).max(cell_width * 2.0);
         let terminal_height =
             (viewport_height - self.chrome_height() - (padding_y * 2.0)).max(cell_height);
-        // In alternate-screen UIs (e.g. fullscreen TUIs), use edge-to-edge sizing
-        // so partial-cell remainders don't leave a visible strip on the right/bottom.
-        let edge_to_edge_grid = self.active_terminal().alternate_screen_mode();
+        let backend_mode = self.runtime_kind();
+        let edge_to_edge_grid = !backend_mode.uses_tmux()
+            && self
+                .active_terminal()
+                .is_some_and(|terminal| terminal.alternate_screen_mode());
         let cols = if edge_to_edge_grid {
             (terminal_width / cell_width).ceil()
         } else {
@@ -99,19 +127,52 @@ impl TerminalView {
         }
         .max(1.0) as u16;
 
-        for tab in &mut self.tabs {
-            let current = tab.terminal.size();
-            if current.cols != cols
-                || current.rows != rows
-                || current.cell_width != cell_size.width
-                || current.cell_height != cell_size.height
-            {
-                tab.terminal.resize(TerminalSize {
-                    cols,
-                    rows,
+        match backend_mode {
+            RuntimeKind::Tmux => {
+                if self.tmux_client_cols() != cols || self.tmux_client_rows() != rows {
+                    if let Err(error) = self.sync_tmux_client_size(cols, rows) {
+                        let now = Instant::now();
+                        if self.should_emit_tmux_resize_error_toast(now) {
+                            termy_toast::error(format!("tmux resize failed: {error}"));
+                        } else {
+                            log::debug!("tmux resize failed (toast debounced): {error}");
+                        }
+                    }
+                }
+            }
+            RuntimeKind::Native => {
+                for tab in &mut self.tabs {
+                    for pane in &mut tab.panes {
+                        pane.left = 0;
+                        pane.top = 0;
+                        pane.width = cols.max(1);
+                        pane.height = rows.max(1);
+                    }
+                    if !tab.panes.iter().any(|pane| pane.id == tab.active_pane_id)
+                        && let Some(pane) = tab.panes.first()
+                    {
+                        tab.active_pane_id = pane.id.clone();
+                    }
+                }
+            }
+        }
+
+        for tab in &self.tabs {
+            for pane in &tab.panes {
+                let next_size = TerminalSize {
+                    cols: pane.width.max(1),
+                    rows: pane.height.max(1),
                     cell_width: cell_size.width,
                     cell_height: cell_size.height,
-                });
+                };
+                let current = pane.terminal.size();
+                if current.cols != next_size.cols
+                    || current.rows != next_size.rows
+                    || current.cell_width != next_size.cell_width
+                    || current.cell_height != next_size.cell_height
+                {
+                    pane.terminal.resize(next_size);
+                }
             }
         }
     }
@@ -134,5 +195,25 @@ impl TerminalView {
 
     pub(in super::super) fn chrome_height(&self) -> f32 {
         Self::titlebar_height() + self.update_banner_height()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn window_y_to_terminal_content_y_subtracts_non_zero_chrome() {
+        assert_eq!(TerminalView::window_y_to_terminal_content_y(120.0, 34.0), 86.0);
+    }
+
+    #[test]
+    fn window_y_to_terminal_content_y_is_identity_when_chrome_is_zero() {
+        assert_eq!(TerminalView::window_y_to_terminal_content_y(120.0, 0.0), 120.0);
+    }
+
+    #[test]
+    fn window_y_to_terminal_content_y_can_be_negative_when_cursor_is_above_chrome() {
+        assert_eq!(TerminalView::window_y_to_terminal_content_y(20.0, 40.0), -20.0);
     }
 }
