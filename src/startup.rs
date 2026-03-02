@@ -14,7 +14,7 @@ impl StartupBlocker {
         };
 
         format!(
-            "Termy cannot continue because {reason}.\n\nError:\n{error}\n\nRecovery:\n- Open your config and set tmux_enabled = false to start in native mode.\n- If tmux integration is desired, set tmux_binary to tmux 3.3 or newer.\n- Save the config and restart Termy, then use tmux Sessions… when ready."
+            "Termy cannot continue because {reason}.\n\nError:\n{error}\n\nRecovery:\n- Open your config and set tmux_enabled = false to start in native mode.\n- Finder/DMG launches use a minimal environment; set tmux_binary to an absolute path (for example /opt/homebrew/bin/tmux) if tmux is not on the default PATH.\n- If tmux integration is desired, ensure tmux 3.3 or newer is installed.\n- Save the config and restart Termy, then use tmux Sessions… when ready."
         )
     }
 
@@ -39,6 +39,8 @@ mod tests {
         assert!(message.contains("tmux 3.3+ required"));
         assert!(message.contains("tmux_enabled"));
         assert!(message.contains("tmux Sessions…"));
+        assert!(message.contains("Finder/DMG"));
+        assert!(message.contains("/opt/homebrew/bin/tmux"));
         assert!(message.contains("restart"));
     }
 

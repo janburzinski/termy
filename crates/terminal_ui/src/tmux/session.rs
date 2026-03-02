@@ -1,4 +1,10 @@
 use anyhow::{Context, Result, anyhow};
+#[cfg(unix)]
+use std::{
+    env,
+    ffi::OsStr,
+    path::PathBuf,
+};
 use std::process::Command;
 
 use super::command::tmux_command_line;
@@ -7,9 +13,60 @@ use super::types::{TmuxSessionSummary, TmuxSocketTarget};
 #[cfg(test)]
 use super::command::quote_tmux_arg;
 
+#[cfg(target_os = "macos")]
+const DEFAULT_UTF8_LOCALE: &str = "en_US.UTF-8";
+#[cfg(all(unix, not(target_os = "macos")))]
+const DEFAULT_UTF8_LOCALE: &str = "C.UTF-8";
+
+#[cfg(unix)]
+const DEFAULT_SYSTEM_PATH_ENTRIES: [&str; 4] = ["/usr/bin", "/bin", "/usr/sbin", "/sbin"];
+#[cfg(unix)]
+const EXTRA_PATH_ENTRIES: [&str; 4] = [
+    "/opt/homebrew/bin",
+    "/opt/homebrew/sbin",
+    "/usr/local/bin",
+    "/usr/local/sbin",
+];
+
+#[cfg(unix)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Utf8LocaleOverridePlan {
+    None,
+    LcCtypeOnly,
+    LcAllAndLcCtype,
+}
+
 pub(crate) fn append_socket_args(command: &mut Command, socket_target: &TmuxSocketTarget) {
     if let Some(socket_name) = socket_target.socket_name() {
         command.arg("-L").arg(socket_name);
+    }
+}
+
+pub(crate) fn normalize_tmux_command_env(command: &mut Command) {
+    #[cfg(unix)]
+    {
+        // Finder/DMG launches on macOS use a minimal process environment.
+        // Normalize PATH + locale for tmux subprocesses so startup behavior
+        // matches terminal-launched runs.
+        if let Some(path) = normalized_tmux_path(env::var_os("PATH").as_deref()) {
+            command.env("PATH", path);
+        }
+
+        let lc_all = env::var("LC_ALL").ok();
+        let lc_ctype = env::var("LC_CTYPE").ok();
+        let lang = env::var("LANG").ok();
+        let target_utf8_locale =
+            preferred_utf8_locale(lc_all.as_deref(), lc_ctype.as_deref(), lang.as_deref());
+        match utf8_locale_override_plan(lc_all.as_deref(), lc_ctype.as_deref(), lang.as_deref()) {
+            Utf8LocaleOverridePlan::None => {}
+            Utf8LocaleOverridePlan::LcCtypeOnly => {
+                command.env("LC_CTYPE", &target_utf8_locale);
+            }
+            Utf8LocaleOverridePlan::LcAllAndLcCtype => {
+                command.env("LC_ALL", &target_utf8_locale);
+                command.env("LC_CTYPE", &target_utf8_locale);
+            }
+        }
     }
 }
 
@@ -19,6 +76,7 @@ pub(crate) fn run_tmux_command_with_socket(
     args: &[&str],
 ) -> Result<std::process::Output> {
     let mut command = Command::new(binary);
+    normalize_tmux_command_env(&mut command);
     append_socket_args(&mut command, socket_target);
     let output = command.args(args).output()?;
 
@@ -41,7 +99,9 @@ pub(crate) fn run_tmux_command_with_socket(
 }
 
 pub(crate) fn verify_tmux_version(binary: &str, minimum_major: u8, minimum_minor: u8) -> Result<()> {
-    let output = Command::new(binary)
+    let mut command = Command::new(binary);
+    normalize_tmux_command_env(&mut command);
+    let output = command
         .arg("-V")
         .output()
         .with_context(|| format!("failed to execute '{}' -V", binary))?;
@@ -151,9 +211,121 @@ pub(crate) fn parse_version_prefix(version: &str) -> Option<(u8, u8)> {
     Some((major, minor))
 }
 
+#[cfg(unix)]
+fn normalized_tmux_path(path: Option<&OsStr>) -> Option<String> {
+    let mut path_entries: Vec<PathBuf> = path
+        .map(env::split_paths)
+        .map(|paths| paths.collect())
+        .unwrap_or_default();
+
+    if path_entries.is_empty() {
+        path_entries.extend(DEFAULT_SYSTEM_PATH_ENTRIES.into_iter().map(PathBuf::from));
+    }
+
+    for entry in EXTRA_PATH_ENTRIES {
+        let entry = PathBuf::from(entry);
+        if !path_entries.iter().any(|existing| existing == &entry) {
+            path_entries.push(entry);
+        }
+    }
+
+    env::join_paths(path_entries.iter())
+        .ok()
+        .map(|joined| joined.to_string_lossy().into_owned())
+}
+
+#[cfg(unix)]
+fn locale_has_utf8_tag(locale: &str) -> bool {
+    let locale = locale.trim();
+    let locale = locale.split_once('@').map_or(locale, |(base, _)| base);
+    let Some((_, encoding)) = locale.split_once('.') else {
+        return false;
+    };
+    let encoding = encoding.trim();
+    encoding.eq_ignore_ascii_case("utf-8") || encoding.eq_ignore_ascii_case("utf8")
+}
+
+#[cfg(unix)]
+fn locale_is_c_or_posix(locale: &str) -> bool {
+    matches!(locale.trim().to_ascii_lowercase().as_str(), "c" | "posix")
+}
+
+#[cfg(unix)]
+fn utf8_locale_from_candidate(locale: &str) -> Option<String> {
+    let locale = locale.trim();
+    if locale.is_empty() || locale_is_c_or_posix(locale) {
+        return None;
+    }
+
+    let (without_modifier, modifier) = locale
+        .split_once('@')
+        .map_or((locale, None), |(base, modifier)| (base, Some(modifier)));
+    let base = without_modifier
+        .split_once('.')
+        .map_or(without_modifier, |(base, _)| base)
+        .trim();
+    if base.is_empty() {
+        return None;
+    }
+
+    let mut utf8_locale = String::with_capacity(
+        base.len() + ".UTF-8".len() + modifier.map_or(0, |value| value.len() + 1),
+    );
+    utf8_locale.push_str(base);
+    utf8_locale.push_str(".UTF-8");
+    if let Some(modifier) = modifier {
+        utf8_locale.push('@');
+        utf8_locale.push_str(modifier);
+    }
+    Some(utf8_locale)
+}
+
+#[cfg(unix)]
+fn preferred_utf8_locale(lc_all: Option<&str>, lc_ctype: Option<&str>, lang: Option<&str>) -> String {
+    [lc_all, lc_ctype, lang]
+        .into_iter()
+        .flatten()
+        .find_map(utf8_locale_from_candidate)
+        .unwrap_or_else(|| DEFAULT_UTF8_LOCALE.to_string())
+}
+
+#[cfg(unix)]
+fn utf8_locale_override_plan(
+    lc_all: Option<&str>,
+    lc_ctype: Option<&str>,
+    lang: Option<&str>,
+) -> Utf8LocaleOverridePlan {
+    let has_utf8_locale = effective_locale_for_decision(lc_all, lc_ctype, lang)
+        .is_some_and(locale_has_utf8_tag);
+    if has_utf8_locale {
+        return Utf8LocaleOverridePlan::None;
+    }
+
+    if lc_all.is_some_and(|value| !value.trim().is_empty()) {
+        Utf8LocaleOverridePlan::LcAllAndLcCtype
+    } else {
+        Utf8LocaleOverridePlan::LcCtypeOnly
+    }
+}
+
+#[cfg(unix)]
+fn effective_locale_for_decision<'a>(
+    lc_all: Option<&'a str>,
+    lc_ctype: Option<&'a str>,
+    lang: Option<&'a str>,
+) -> Option<&'a str> {
+    [lc_all, lc_ctype, lang]
+        .into_iter()
+        .flatten()
+        .map(str::trim)
+        .find(|value| !value.is_empty())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[cfg(unix)]
+    use std::ffi::OsString;
 
     #[test]
     fn rename_session_rejects_empty_session_names() {
@@ -232,5 +404,72 @@ mod tests {
             .map(|arg| arg.to_string_lossy().to_string())
             .collect::<Vec<_>>();
         assert_eq!(named_args, vec!["-L", "work"]);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn normalized_tmux_path_starts_from_default_system_path_when_missing() {
+        let path = normalized_tmux_path(None).expect("normalized path");
+        let parsed = std::env::split_paths(&OsString::from(path)).collect::<Vec<_>>();
+        assert!(parsed.contains(&PathBuf::from("/usr/bin")));
+        assert!(parsed.contains(&PathBuf::from("/bin")));
+        assert!(parsed.contains(&PathBuf::from("/usr/sbin")));
+        assert!(parsed.contains(&PathBuf::from("/sbin")));
+        assert!(parsed.contains(&PathBuf::from("/opt/homebrew/bin")));
+        assert!(parsed.contains(&PathBuf::from("/opt/homebrew/sbin")));
+        assert!(parsed.contains(&PathBuf::from("/usr/local/bin")));
+        assert!(parsed.contains(&PathBuf::from("/usr/local/sbin")));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn normalized_tmux_path_appends_missing_entries_without_duplication() {
+        let raw = OsString::from("/opt/homebrew/bin:/usr/bin:/bin");
+        let path = normalized_tmux_path(Some(raw.as_os_str())).expect("normalized path");
+        let parsed = std::env::split_paths(&OsString::from(path)).collect::<Vec<_>>();
+        let homebrew_bin = PathBuf::from("/opt/homebrew/bin");
+        assert_eq!(parsed.iter().filter(|entry| **entry == homebrew_bin).count(), 1);
+        assert!(parsed.contains(&PathBuf::from("/opt/homebrew/sbin")));
+        assert!(parsed.contains(&PathBuf::from("/usr/local/bin")));
+        assert!(parsed.contains(&PathBuf::from("/usr/local/sbin")));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn locale_override_plan_respects_lc_all_precedence() {
+        assert_eq!(
+            utf8_locale_override_plan(Some("C"), Some("en_US.UTF-8"), Some("en_US.UTF-8")),
+            Utf8LocaleOverridePlan::LcAllAndLcCtype
+        );
+        assert_eq!(
+            utf8_locale_override_plan(Some("en_US.UTF-8"), Some("C"), Some("C")),
+            Utf8LocaleOverridePlan::None
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn locale_override_plan_uses_lc_ctype_or_lang_when_lc_all_missing() {
+        assert_eq!(
+            utf8_locale_override_plan(None, Some("C"), Some("en_US.UTF-8")),
+            Utf8LocaleOverridePlan::LcCtypeOnly
+        );
+        assert_eq!(
+            utf8_locale_override_plan(None, Some("en_US.UTF-8"), None),
+            Utf8LocaleOverridePlan::None
+        );
+        assert_eq!(
+            utf8_locale_override_plan(None, None, Some("en_US.UTF-8")),
+            Utf8LocaleOverridePlan::None
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn preferred_utf8_locale_preserves_modifier_and_converts_encoding() {
+        assert_eq!(
+            preferred_utf8_locale(None, Some("en_US.ISO8859-1@euro"), None),
+            "en_US.UTF-8@euro"
+        );
     }
 }

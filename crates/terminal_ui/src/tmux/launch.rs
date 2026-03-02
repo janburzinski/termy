@@ -12,7 +12,7 @@ use std::{
 use std::process::Command;
 
 #[cfg(unix)]
-use super::session::append_socket_args;
+use super::session::{append_socket_args, normalize_tmux_command_env};
 use super::types::{
     TmuxLaunchTarget, TmuxRuntimeConfig, TmuxShutdownMode, TmuxSocketTarget,
 };
@@ -87,6 +87,7 @@ pub(crate) fn spawn_tmux_control_mode(
     let child_stderr = user;
 
     let mut command = Command::new(config.binary.as_str());
+    normalize_tmux_command_env(&mut command);
     append_socket_args(&mut command, socket_target);
     command.arg("-CC").arg("new-session");
     if attach_existing {
