@@ -1,5 +1,6 @@
 mod grid;
 mod links;
+mod locale;
 mod pane_terminal;
 mod runtime;
 mod tmux;
