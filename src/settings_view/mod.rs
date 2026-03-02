@@ -234,7 +234,7 @@ impl SettingsWindow {
         let already_loaded_for_key = self.openai_models_loaded_for_api_key.as_ref().is_some_and(
             |(loaded_provider, loaded_key)| *loaded_provider == provider && loaded_key == &api_key,
         );
-        if !force && already_loaded_for_key && !self.openai_model_options.is_empty() {
+        if !force && already_loaded_for_key {
             return;
         }
 

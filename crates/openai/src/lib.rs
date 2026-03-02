@@ -218,7 +218,13 @@ impl OpenAiClient {
 
     /// Fetch all available models for this API key.
     pub fn fetch_models(&self) -> Result<Vec<OpenAiModel>, OpenAiError> {
-        let response = ureq::get("https://api.openai.com/v1/models")
+        let agent = ureq::AgentBuilder::new()
+            .timeout_connect(std::time::Duration::from_secs(5))
+            .timeout_read(std::time::Duration::from_secs(10))
+            .timeout_write(std::time::Duration::from_secs(10))
+            .build();
+        let response = agent
+            .get("https://api.openai.com/v1/models")
             .set("Authorization", &format!("Bearer {}", self.api_key))
             .set("Content-Type", "application/json")
             .call()?;

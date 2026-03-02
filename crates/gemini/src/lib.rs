@@ -139,12 +139,7 @@ impl GeminiClient {
     }
 
     fn normalized_model_id(&self) -> String {
-        let trimmed = self.model.trim();
-        if trimmed.starts_with("models/") {
-            trimmed.to_string()
-        } else {
-            format!("models/{trimmed}")
-        }
+        self.model.trim().to_string()
     }
 
     pub fn message_with_terminal_context(

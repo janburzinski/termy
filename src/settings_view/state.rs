@@ -122,6 +122,13 @@ pub(super) struct FieldSpec {
 }
 
 impl SettingsWindow {
+    pub(super) fn is_secret_field(field: EditableField) -> bool {
+        matches!(
+            field,
+            EditableField::OpenaiApiKey | EditableField::GeminiApiKey
+        )
+    }
+
     pub(super) fn parse_tab_title_source_token(
         token: &str,
     ) -> Option<termy_config_core::TabTitleSource> {
@@ -244,6 +251,8 @@ impl SettingsWindow {
             RootSettingId::WindowWidth,
             RootSettingId::WindowHeight,
             RootSettingId::AiProvider,
+            RootSettingId::OpenaiApiKey,
+            RootSettingId::GeminiApiKey,
             RootSettingId::OpenaiModel,
         ];
 

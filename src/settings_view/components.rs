@@ -1,6 +1,14 @@
 use super::*;
 
 impl SettingsWindow {
+    fn masked_secret_value(text: &str) -> String {
+        if text.is_empty() || text.eq_ignore_ascii_case("not configured") {
+            "Not configured".to_string()
+        } else {
+            "•".repeat(text.chars().count())
+        }
+    }
+
     pub(super) fn wrap_setting_with_scroll_anchor(
         &self,
         setting_key: &'static str,
@@ -66,10 +74,18 @@ impl SettingsWindow {
                     .rounded(px(0.0))
                     .bg(if can_reset { bg_input } else { disabled_bg })
                     .border_1()
-                    .border_color(if can_reset { border_color } else { disabled_border })
+                    .border_color(if can_reset {
+                        border_color
+                    } else {
+                        disabled_border
+                    })
                     .text_sm()
                     .font_weight(gpui::FontWeight::MEDIUM)
-                    .text_color(if can_reset { text_secondary } else { disabled_text })
+                    .text_color(if can_reset {
+                        text_secondary
+                    } else {
+                        disabled_text
+                    })
                     .when(can_reset, |s| {
                         s.cursor_pointer()
                             .hover(move |s| s.bg(hover_bg).text_color(text_primary))
@@ -118,7 +134,11 @@ impl SettingsWindow {
             .rounded(px(0.0))
             .bg(if can_reset { bg_input } else { disabled_bg })
             .border_1()
-            .border_color(if can_reset { border_color } else { disabled_border })
+            .border_color(if can_reset {
+                border_color
+            } else {
+                disabled_border
+            })
             .text_xs()
             .font_weight(gpui::FontWeight::MEDIUM)
             .text_color(if can_reset { text_muted } else { disabled_text })
@@ -305,7 +325,9 @@ impl SettingsWindow {
             let option_value = option.value.clone();
             list = list.child(
                 div()
-                    .id(SharedString::from(format!("dropdown-option-{field:?}-{index}")))
+                    .id(SharedString::from(format!(
+                        "dropdown-option-{field:?}-{index}"
+                    )))
                     .px_3()
                     .py_1()
                     .text_sm()
@@ -328,13 +350,19 @@ impl SettingsWindow {
         Some(
             deferred(
                 div()
-                    .id(SharedString::from(format!("dropdown-suggestions-{field:?}")))
+                    .id(SharedString::from(format!(
+                        "dropdown-suggestions-{field:?}"
+                    )))
                     .occlude()
                     .absolute()
                     .top(px(SETTINGS_CONTROL_HEIGHT + 2.0))
                     .left_0()
                     .right_0()
-                    .max_h(if field == EditableField::Theme { px(180.0) } else { px(240.0) })
+                    .max_h(if field == EditableField::Theme {
+                        px(180.0)
+                    } else {
+                        px(240.0)
+                    })
                     .overflow_scroll()
                     .overflow_x_hidden()
                     .rounded(px(0.0))
@@ -372,8 +400,11 @@ impl SettingsWindow {
         text_primary: Rgba,
         cx: &mut Context<Self>,
     ) -> AnyElement {
+        let is_secret_field = Self::is_secret_field(field);
         let readonly_display_value = if !is_active && uses_dropdown {
             self.dropdown_display_value(field, &display_value)
+        } else if !is_active && is_secret_field {
+            Self::masked_secret_value(&display_value)
         } else {
             display_value.clone()
         };
@@ -435,6 +466,49 @@ impl SettingsWindow {
         }
 
         if is_active && uses_text_input {
+            if is_secret_field {
+                let mut hidden_text = text_secondary;
+                hidden_text.a = 0.0;
+                let mut hidden_selection = self.accent_with_alpha(0.3);
+                hidden_selection.a = 0.0;
+                let masked_active_value = self
+                    .active_input
+                    .as_ref()
+                    .filter(|input| input.field == field)
+                    .map(|input| Self::masked_secret_value(input.state.text()))
+                    .unwrap_or_else(|| Self::masked_secret_value(&display_value));
+
+                let font = Font {
+                    family: self.config.font_family.clone().into(),
+                    ..Font::default()
+                };
+
+                return div()
+                    .relative()
+                    .size_full()
+                    .child(TextInputElement::new(
+                        cx.entity(),
+                        self.focus_handle.clone(),
+                        font,
+                        px(SETTINGS_INPUT_TEXT_SIZE),
+                        hidden_text.into(),
+                        hidden_selection.into(),
+                        TextInputAlignment::Left,
+                    ))
+                    .child(
+                        div()
+                            .absolute()
+                            .left_0()
+                            .top_0()
+                            .h_full()
+                            .flex()
+                            .items_center()
+                            .text_size(px(SETTINGS_INPUT_TEXT_SIZE))
+                            .text_color(text_secondary)
+                            .child(masked_active_value),
+                    )
+                    .into_any_element();
+            }
             let font = Font {
                 family: self.config.font_family.clone().into(),
                 ..Font::default()
@@ -570,7 +644,10 @@ impl SettingsWindow {
         }
         let is_numeric = Self::is_numeric_field(field);
         let uses_text_input = Self::uses_text_input_for_field(field);
-        let is_active = self.active_input.as_ref().is_some_and(|input| input.field == field);
+        let is_active = self
+            .active_input
+            .as_ref()
+            .is_some_and(|input| input.field == field);
         let uses_dropdown = Self::field_uses_dropdown(field);
         let accent_inner_border = is_numeric || uses_dropdown;
         let text_secondary = self.text_secondary();
@@ -625,7 +702,11 @@ impl SettingsWindow {
             .rounded(px(0.0))
             .bg(row_bg)
             .border_1()
-            .border_color(if dropdown_open { Rgba::default() } else { row_border })
+            .border_color(if dropdown_open {
+                Rgba::default()
+            } else {
+                row_border
+            })
             .cursor_pointer()
             .when(!is_numeric, |s| {
                 s.on_mouse_down(
@@ -634,9 +715,11 @@ impl SettingsWindow {
                         view.handle_editable_row_mouse_down(field, event, window, cx);
                     }),
                 )
-                .on_mouse_move(cx.listener(move |view, event: &MouseMoveEvent, _window, cx| {
-                    view.handle_editable_row_mouse_move(field, event, cx);
-                }))
+                .on_mouse_move(
+                    cx.listener(move |view, event: &MouseMoveEvent, _window, cx| {
+                        view.handle_editable_row_mouse_move(field, event, cx);
+                    }),
+                )
                 .on_mouse_up(
                     MouseButton::Left,
                     cx.listener(move |view, _event: &MouseUpEvent, _window, cx| {
@@ -657,8 +740,20 @@ impl SettingsWindow {
                     .min_w(px(0.0))
                     .flex_col()
                     .gap(px(2.0))
-                    .child(div().text_sm().font_weight(gpui::FontWeight::MEDIUM).text_color(text_primary).child(title))
-                    .child(div().text_xs().text_color(text_muted).line_height(px(17.0)).child(description)),
+                    .child(
+                        div()
+                            .text_sm()
+                            .font_weight(gpui::FontWeight::MEDIUM)
+                            .text_color(text_primary)
+                            .child(title),
+                    )
+                    .child(
+                        div()
+                            .text_xs()
+                            .text_color(text_muted)
+                            .line_height(px(17.0))
+                            .child(description),
+                    ),
             )
             .child(
                 div()
@@ -682,7 +777,11 @@ impl SettingsWindow {
                                     .rounded(px(0.0))
                                     .bg(input_bg)
                                     .border_1()
-                                    .border_color(if is_active && accent_inner_border { accent.into() } else { border_color })
+                                    .border_color(if is_active && accent_inner_border {
+                                        accent.into()
+                                    } else {
+                                        border_color
+                                    })
                                     .overflow_hidden()
                                     .child(value_element),
                             )
@@ -834,15 +933,17 @@ impl SettingsWindow {
                     cx.notify();
                 }),
             )
-            .on_mouse_move(cx.listener(move |view, event: &MouseMoveEvent, _window, cx| {
-                if !event.dragging() {
-                    return;
-                }
-                cx.stop_propagation();
-                let x: f32 = event.position.x.into();
-                view.update_background_opacity_drag(x, slider_width);
-                cx.notify();
-            }))
+            .on_mouse_move(
+                cx.listener(move |view, event: &MouseMoveEvent, _window, cx| {
+                    if !event.dragging() {
+                        return;
+                    }
+                    cx.stop_propagation();
+                    let x: f32 = event.position.x.into();
+                    view.update_background_opacity_drag(x, slider_width);
+                    cx.notify();
+                }),
+            )
             .on_mouse_up(
                 MouseButton::Left,
                 cx.listener(|view, _event: &MouseUpEvent, _window, cx| {
@@ -1051,5 +1152,4 @@ impl SettingsWindow {
 
         self.wrap_setting_with_scroll_anchor(search_key, row.into_any_element())
     }
-
 }
