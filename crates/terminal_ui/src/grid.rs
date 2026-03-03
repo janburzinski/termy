@@ -28,8 +28,11 @@ pub enum TerminalCursorStyle {
 }
 
 /// Custom element for rendering the terminal grid.
+pub type TerminalGridRow = Arc<Vec<CellRenderInfo>>;
+pub type TerminalGridRows = Arc<Vec<TerminalGridRow>>;
+
 pub struct TerminalGrid {
-    pub cells: Arc<Vec<CellRenderInfo>>,
+    pub cells: TerminalGridRows,
     pub cell_size: Size<Pixels>,
     pub cols: usize,
     pub rows: usize,
@@ -412,53 +415,56 @@ impl Element for TerminalGrid {
         ));
 
         // Paint background colors first.
-        for cell in self.cells.iter() {
-            let x = origin.x + self.cell_size.width * cell.col as f32;
-            let y = origin.y + self.cell_size.height * cell.row as f32;
+        for row_cells in self.cells.iter() {
+            for cell in row_cells.iter() {
+                let x = origin.x + self.cell_size.width * cell.col as f32;
+                let y = origin.y + self.cell_size.height * cell.row as f32;
 
-            let cell_bounds = Bounds {
-                origin: point(x, y),
-                size: self.cell_size,
-            };
+                let cell_bounds = Bounds {
+                    origin: point(x, y),
+                    size: self.cell_size,
+                };
 
-            if cell.selected {
-                window.paint_quad(quad(
-                    cell_bounds,
-                    px(0.0),
-                    self.selection_bg,
-                    gpui::Edges::default(),
-                    Hsla::transparent_black(),
-                    gpui::BorderStyle::default(),
-                ));
-            } else if cell.search_current {
-                window.paint_quad(quad(
-                    cell_bounds,
-                    px(0.0),
-                    self.search_current_bg,
-                    gpui::Edges::default(),
-                    Hsla::transparent_black(),
-                    gpui::BorderStyle::default(),
-                ));
-            } else if cell.search_match {
-                window.paint_quad(quad(
-                    cell_bounds,
-                    px(0.0),
-                    self.search_match_bg,
-                    gpui::Edges::default(),
-                    Hsla::transparent_black(),
-                    gpui::BorderStyle::default(),
-                ));
-            } else if cell.bg.a > 0.01 && !colors_approximately_equal(&cell.bg, &self.default_bg) {
-                window.paint_quad(quad(
-                    cell_bounds,
-                    px(0.0),
-                    cell.bg,
-                    gpui::Edges::default(),
-                    Hsla::transparent_black(),
-                    gpui::BorderStyle::default(),
-                ));
+                if cell.selected {
+                    window.paint_quad(quad(
+                        cell_bounds,
+                        px(0.0),
+                        self.selection_bg,
+                        gpui::Edges::default(),
+                        Hsla::transparent_black(),
+                        gpui::BorderStyle::default(),
+                    ));
+                } else if cell.search_current {
+                    window.paint_quad(quad(
+                        cell_bounds,
+                        px(0.0),
+                        self.search_current_bg,
+                        gpui::Edges::default(),
+                        Hsla::transparent_black(),
+                        gpui::BorderStyle::default(),
+                    ));
+                } else if cell.search_match {
+                    window.paint_quad(quad(
+                        cell_bounds,
+                        px(0.0),
+                        self.search_match_bg,
+                        gpui::Edges::default(),
+                        Hsla::transparent_black(),
+                        gpui::BorderStyle::default(),
+                    ));
+                } else if cell.bg.a > 0.01
+                    && !colors_approximately_equal(&cell.bg, &self.default_bg)
+                {
+                    window.paint_quad(quad(
+                        cell_bounds,
+                        px(0.0),
+                        cell.bg,
+                        gpui::Edges::default(),
+                        Hsla::transparent_black(),
+                        gpui::BorderStyle::default(),
+                    ));
+                }
             }
-
         }
 
         if let Some((cursor_col, cursor_row)) = self.cursor_cell {
@@ -569,6 +575,14 @@ impl Element for TerminalGrid {
 }
 
 impl TerminalGrid {
+    fn cell_count(&self) -> usize {
+        self.cells.iter().map(|row| row.len()).sum()
+    }
+
+    fn iter_cells(&self) -> impl Iterator<Item = &CellRenderInfo> {
+        self.cells.iter().flat_map(|row| row.iter())
+    }
+
     fn cell_is_drawable_text(cell: &CellRenderInfo) -> bool {
         cell.render_text && cell.char != ' ' && cell.char != '\0' && !cell.char.is_control()
     }
@@ -609,10 +623,10 @@ impl TerminalGrid {
 
     fn collect_draw_ops(&self, cursor_fg: Hsla, highlight_fg: Hsla) -> Vec<TextDrawOp> {
         let mut ops = Vec::new();
-        ops.reserve(self.cells.len());
+        ops.reserve(self.cell_count());
         let mut current: Option<TextBatch> = None;
 
-        for cell in self.cells.iter() {
+        for cell in self.iter_cells() {
             if !Self::cell_is_drawable_text(cell) {
                 Self::push_pending_text_batch(&mut current, &mut ops);
                 continue;
@@ -683,7 +697,7 @@ mod tests {
 
     fn test_grid(cells: Vec<CellRenderInfo>, hovered: Option<(usize, usize, usize)>) -> TerminalGrid {
         TerminalGrid {
-            cells: Arc::new(cells),
+            cells: Arc::new(vec![Arc::new(cells)]),
             cell_size: Size {
                 width: px(10.0),
                 height: px(20.0),

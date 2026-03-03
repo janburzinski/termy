@@ -626,7 +626,7 @@ impl Terminal {
     }
 
     /// Access the terminal for in-place mutation.
-    pub fn with_term_mut<R>(&self, f: impl FnOnce(&mut Term<JsonEventListener>) -> R) -> R {
+    fn with_term_mut<R>(&self, f: impl FnOnce(&mut Term<JsonEventListener>) -> R) -> R {
         let mut term = self.term.lock();
         f(&mut term)
     }

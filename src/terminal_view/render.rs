@@ -106,6 +106,49 @@ fn term_line_from_viewport_row(row: usize, display_offset: usize) -> Option<i32>
     i32::try_from(row - display_offset).ok()
 }
 
+type PaneRenderRow = Arc<Vec<CellRenderInfo>>;
+type PaneRenderCells = Arc<Vec<PaneRenderRow>>;
+
+fn pane_render_cells_match_dimensions(cells: &PaneRenderCells, cols: usize, rows: usize) -> bool {
+    cells.len() == rows && cells.iter().all(|row_cells| row_cells.len() == cols)
+}
+
+fn merge_pane_render_rows(
+    existing: &PaneRenderCells,
+    rows: usize,
+    cols: usize,
+    updates: Vec<(usize, usize, CellRenderInfo)>,
+) -> PaneRenderCells {
+    if updates.is_empty() {
+        return existing.clone();
+    }
+
+    let mut touched_rows = vec![None; rows];
+    for (row, col, cell) in updates {
+        if row >= rows || col >= cols {
+            continue;
+        }
+
+        let row_cells = touched_rows[row].get_or_insert_with(|| existing[row].as_ref().clone());
+        row_cells[col] = cell;
+    }
+
+    if touched_rows.iter().all(Option::is_none) {
+        return existing.clone();
+    }
+
+    let mut merged_rows = Vec::with_capacity(rows);
+    for row in 0..rows {
+        if let Some(next_row) = touched_rows[row].take() {
+            merged_rows.push(Arc::new(next_row));
+        } else {
+            merged_rows.push(existing[row].clone());
+        }
+    }
+
+    Arc::new(merged_rows)
+}
+
 fn command_palette_backdrop_transform() -> CellColorTransform {
     let preset = pane_focus_preset(PaneFocusEffect::SoftSpotlight)
         .expect("soft spotlight pane focus preset must exist");
@@ -331,7 +374,68 @@ impl TerminalView {
         rows: usize,
         display_offset: usize,
         context: PaneCellBuildContext<'_>,
-    ) -> Arc<Vec<CellRenderInfo>> {
+    ) -> PaneRenderCells {
+        if rows == 0 {
+            return Arc::new(Vec::new());
+        }
+        if cols == 0 {
+            return Arc::new((0..rows).map(|_| Arc::new(Vec::new())).collect());
+        }
+
+        let mut row_cells: Vec<Vec<CellRenderInfo>> = (0..rows)
+            .map(|_| Vec::with_capacity(cols))
+            .collect();
+        let mut expected_row = 0usize;
+        let mut expected_col = 0usize;
+        let mut ordering_failed = false;
+
+        let _ = terminal.for_each_renderable_cell(
+            |cell_display_offset, term_line, col, cell_content| {
+                if ordering_failed || cell_display_offset != display_offset {
+                    return;
+                }
+                if col >= cols {
+                    ordering_failed = true;
+                    return;
+                }
+                let Some(row) = Self::viewport_row_from_term_line(term_line, cell_display_offset) else {
+                    ordering_failed = true;
+                    return;
+                };
+                if row >= rows || row != expected_row || col != expected_col {
+                    ordering_failed = true;
+                    return;
+                }
+
+                row_cells[row]
+                    .push(self.build_cell_render_info(col, row, term_line, cell_content, context));
+
+                expected_col += 1;
+                if expected_col == cols {
+                    expected_col = 0;
+                    expected_row += 1;
+                }
+            },
+        );
+
+        let fully_populated = expected_row == rows
+            && expected_col == 0
+            && row_cells.iter().all(|row| row.len() == cols);
+        if !ordering_failed && fully_populated {
+            return Arc::new(row_cells.into_iter().map(Arc::new).collect());
+        }
+
+        self.rebuild_pane_render_cache_fallback(terminal, cols, rows, display_offset, context)
+    }
+
+    fn rebuild_pane_render_cache_fallback(
+        &self,
+        terminal: &Terminal,
+        cols: usize,
+        rows: usize,
+        display_offset: usize,
+        context: PaneCellBuildContext<'_>,
+    ) -> PaneRenderCells {
         let mut default_bg = context.colors.background;
         default_bg.a *= context.effective_background_opacity;
         let (default_fg, default_bg) = apply_cell_color_transform(
@@ -341,10 +445,11 @@ impl TerminalView {
             context.pane_focus_target_bg,
             context.terminal_surface_bg,
         );
-        let mut cells = Vec::with_capacity(cols.saturating_mul(rows));
+        let mut rows_cache = Vec::with_capacity(rows);
         for row in 0..rows {
+            let mut row_cells = Vec::with_capacity(cols);
             for col in 0..cols {
-                cells.push(CellRenderInfo {
+                row_cells.push(CellRenderInfo {
                     col,
                     row,
                     char: ' ',
@@ -357,25 +462,27 @@ impl TerminalView {
                     search_match: false,
                 });
             }
+            rows_cache.push(row_cells);
         }
 
-        let _ = terminal.for_each_renderable_cell(|cell_display_offset, term_line, col, cell_content| {
-            if cell_display_offset != display_offset || col >= cols {
-                return;
-            }
-            let Some(row) = Self::viewport_row_from_term_line(term_line, cell_display_offset) else {
-                return;
-            };
-            if row >= rows {
-                return;
-            }
-            let index = row.saturating_mul(cols).saturating_add(col);
-            if index >= cells.len() {
-                return;
-            }
-            cells[index] = self.build_cell_render_info(col, row, term_line, cell_content, context);
-        });
-        Arc::new(cells)
+        let _ = terminal.for_each_renderable_cell(
+            |cell_display_offset, term_line, col, cell_content| {
+                if cell_display_offset != display_offset || col >= cols {
+                    return;
+                }
+                let Some(row) = Self::viewport_row_from_term_line(term_line, cell_display_offset) else {
+                    return;
+                };
+                if row >= rows {
+                    return;
+                }
+
+                rows_cache[row][col] =
+                    self.build_cell_render_info(col, row, term_line, cell_content, context);
+            },
+        );
+
+        Arc::new(rows_cache.into_iter().map(Arc::new).collect())
     }
 
     fn patch_pane_render_cache(
@@ -384,15 +491,16 @@ impl TerminalView {
         cols: usize,
         rows: usize,
         display_offset: usize,
-        existing: &Arc<Vec<CellRenderInfo>>,
+        cells: &mut PaneRenderCells,
         spans: &[TerminalDirtySpan],
         context: PaneCellBuildContext<'_>,
-    ) -> Arc<Vec<CellRenderInfo>> {
-        if existing.len() != cols.saturating_mul(rows) {
-            return self.rebuild_pane_render_cache(terminal, cols, rows, display_offset, context);
+    ) {
+        if !pane_render_cells_match_dimensions(cells, cols, rows) {
+            *cells = self.rebuild_pane_render_cache(terminal, cols, rows, display_offset, context);
+            return;
         }
 
-        let mut cells = (**existing).clone();
+        let mut updates = Vec::new();
         let _ = terminal.with_grid(|grid| {
             let Some(screen_lines) = i32::try_from(grid.screen_lines()).ok() else {
                 return;
@@ -424,16 +532,21 @@ impl TerminalView {
                 }
 
                 for col in left_col..=right_col {
-                    let index = row.saturating_mul(cols).saturating_add(col);
-                    if index >= cells.len() {
-                        continue;
-                    }
                     let cell_content = &line_ref[Column(col)];
-                    cells[index] = self.build_cell_render_info(col, row, term_line, cell_content, context);
+                    updates.push((
+                        row,
+                        col,
+                        self.build_cell_render_info(col, row, term_line, cell_content, context),
+                    ));
                 }
             }
         });
-        Arc::new(cells)
+
+        if updates.is_empty() {
+            return;
+        }
+
+        *cells = merge_pane_render_rows(cells, rows, cols, updates);
     }
 
     fn update_pane_render_cache(
@@ -445,7 +558,7 @@ impl TerminalView {
         cache: &mut TerminalPaneRenderCache,
         cache_key: TerminalPaneRenderCacheKey,
         context: PaneCellBuildContext<'_>,
-    ) -> Arc<Vec<CellRenderInfo>> {
+    ) -> PaneRenderCells {
         let damage = terminal.take_damage_snapshot();
         let strategy = pane_cache_update_strategy(
             !cache.cells.is_empty(),
@@ -475,8 +588,15 @@ impl TerminalView {
                     cache.key = Some(cache_key);
                     return cache.cells.clone();
                 };
-                cache.cells =
-                    self.patch_pane_render_cache(terminal, cols, rows, display_offset, &cache.cells, &spans, context);
+                self.patch_pane_render_cache(
+                    terminal,
+                    cols,
+                    rows,
+                    display_offset,
+                    &mut cache.cells,
+                    &spans,
+                    context,
+                );
             }
         }
 
@@ -489,7 +609,7 @@ impl TerminalView {
 
     fn build_terminal_grid_from_cache(
         &self,
-        cells: Arc<Vec<CellRenderInfo>>,
+        cells: PaneRenderCells,
         cell_size: Size<Pixels>,
         cols: usize,
         rows: usize,
@@ -1695,6 +1815,21 @@ impl Render for TerminalView {
 mod tests {
     use super::*;
 
+    fn test_render_cell(col: usize, row: usize, c: char) -> CellRenderInfo {
+        CellRenderInfo {
+            col,
+            row,
+            char: c,
+            fg: gpui::Hsla::transparent_black(),
+            bg: gpui::Hsla::transparent_black(),
+            bold: false,
+            render_text: true,
+            selected: false,
+            search_current: false,
+            search_match: false,
+        }
+    }
+
     fn tmux_test_pane(id: &str, left: u16, top: u16, cols: u16, rows: u16) -> TerminalPane {
         let size = TerminalSize {
             cols,
@@ -1711,6 +1846,60 @@ mod tests {
             terminal: Terminal::new_tmux(size, 128),
             render_cache: std::cell::RefCell::new(TerminalPaneRenderCache::default()),
         }
+    }
+
+    fn test_render_rows(rows: Vec<Vec<CellRenderInfo>>) -> PaneRenderCells {
+        Arc::new(rows.into_iter().map(Arc::new).collect())
+    }
+
+    #[test]
+    fn merge_pane_render_rows_reuses_existing_arc_when_updates_empty() {
+        let existing = test_render_rows(vec![vec![
+            test_render_cell(0, 0, 'a'),
+            test_render_cell(1, 0, 'b'),
+            test_render_cell(2, 0, 'c'),
+        ]]);
+
+        let merged = merge_pane_render_rows(&existing, 1, 3, Vec::new());
+        assert!(Arc::ptr_eq(&existing, &merged));
+    }
+
+    #[test]
+    fn merge_pane_render_rows_updates_only_touched_row_cells() {
+        let existing = test_render_rows(vec![
+            vec![test_render_cell(0, 0, 'a'), test_render_cell(1, 0, 'b')],
+            vec![test_render_cell(0, 1, 'c'), test_render_cell(1, 1, 'd')],
+            vec![test_render_cell(0, 2, 'e'), test_render_cell(1, 2, 'f')],
+        ]);
+        let updates = vec![(1, 1, test_render_cell(1, 1, 'x'))];
+
+        let merged = merge_pane_render_rows(&existing, 3, 2, updates);
+
+        assert!(Arc::ptr_eq(&existing[0], &merged[0]));
+        assert!(!Arc::ptr_eq(&existing[1], &merged[1]));
+        assert!(Arc::ptr_eq(&existing[2], &merged[2]));
+        assert_eq!(merged[0][0].char, 'a');
+        assert_eq!(merged[1][1].char, 'x');
+        assert_eq!(merged[2][1].char, 'f');
+    }
+
+    #[test]
+    fn merge_pane_render_rows_uses_last_write_for_duplicate_cell() {
+        let existing = test_render_rows(vec![
+            vec![test_render_cell(0, 0, 'a'), test_render_cell(1, 0, 'b')],
+            vec![test_render_cell(0, 1, 'c'), test_render_cell(1, 1, 'd')],
+        ]);
+        let updates = vec![
+            (1, 1, test_render_cell(1, 1, 'x')),
+            (1, 1, test_render_cell(1, 1, 'y')),
+            (0, 0, test_render_cell(0, 0, 'z')),
+        ];
+
+        let merged = merge_pane_render_rows(&existing, 2, 2, updates);
+
+        assert_eq!(merged[0][0].char, 'z');
+        assert_eq!(merged[1][1].char, 'y');
+        assert_eq!(merged[1][0].char, 'c');
     }
 
     #[test]
@@ -1923,5 +2112,37 @@ mod tests {
             }]),
         );
         assert_eq!(strategy, PaneCacheUpdateStrategy::Partial);
+    }
+
+    #[test]
+    fn pane_cache_strategy_forces_full_rebuild_when_display_offset_changes() {
+        let strategy = pane_cache_update_strategy(
+            true,
+            true,
+            false,
+            true,
+            &TerminalDamageSnapshot::Partial(vec![TerminalDirtySpan {
+                row: 1,
+                left_col: 0,
+                right_col: 0,
+            }]),
+        );
+        assert_eq!(strategy, PaneCacheUpdateStrategy::Full);
+    }
+
+    #[test]
+    fn pane_cache_strategy_forces_full_rebuild_when_cache_is_empty() {
+        let strategy = pane_cache_update_strategy(
+            false,
+            true,
+            true,
+            true,
+            &TerminalDamageSnapshot::Partial(vec![TerminalDirtySpan {
+                row: 0,
+                left_col: 0,
+                right_col: 0,
+            }]),
+        );
+        assert_eq!(strategy, PaneCacheUpdateStrategy::Full);
     }
 }

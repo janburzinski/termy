@@ -28,7 +28,7 @@ use termy_search::SearchState;
 use termy_terminal_ui::{
     CellRenderInfo, PaneTerminal, TabTitleShellIntegration, Terminal as NativeTerminal,
     TerminalCursorStyle, TerminalDamageSnapshot, TerminalDirtySpan, TerminalEvent, TerminalGrid,
-    TerminalRuntimeConfig, TerminalSize, TmuxLaunchTarget,
+    TerminalGridRows, TerminalRuntimeConfig, TerminalSize, TmuxLaunchTarget,
     WorkingDirFallback as RuntimeWorkingDirFallback, find_link_in_line, keystroke_to_input,
 };
 use termy_toast::ToastManager;
@@ -466,7 +466,7 @@ struct TerminalPaneRenderCacheKey {
 
 #[derive(Clone, Default)]
 struct TerminalPaneRenderCache {
-    cells: std::sync::Arc<Vec<CellRenderInfo>>,
+    cells: TerminalGridRows,
     cols: usize,
     rows: usize,
     display_offset: usize,
