@@ -497,6 +497,8 @@ struct TerminalRenderMetricsCounters {
     cache_full_count: u64,
     cache_partial_count: u64,
     cache_reuse_count: u64,
+    dirty_span_count: u64,
+    patched_cell_count: u64,
 }
 
 #[cfg(debug_assertions)]
@@ -509,6 +511,10 @@ impl TerminalRenderMetricsCounters {
                 .cache_partial_count
                 .saturating_sub(previous.cache_partial_count),
             cache_reuse_count: self.cache_reuse_count.saturating_sub(previous.cache_reuse_count),
+            dirty_span_count: self.dirty_span_count.saturating_sub(previous.dirty_span_count),
+            patched_cell_count: self
+                .patched_cell_count
+                .saturating_sub(previous.patched_cell_count),
         }
     }
 }

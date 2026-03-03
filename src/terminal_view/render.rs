@@ -66,6 +66,8 @@ struct RenderPassCacheStrategyCounts {
     full: u64,
     partial: u64,
     reuse: u64,
+    dirty_span_count: u64,
+    patched_cell_count: u64,
 }
 
 #[cfg(debug_assertions)]
@@ -83,11 +85,25 @@ impl RenderPassCacheStrategyCounts {
             }
         }
     }
+
+    fn record_partial_work(&mut self, dirty_span_count: usize, patched_cell_count: usize) {
+        self.dirty_span_count = self
+            .dirty_span_count
+            .saturating_add(usize_to_u64_saturating(dirty_span_count));
+        self.patched_cell_count = self
+            .patched_cell_count
+            .saturating_add(usize_to_u64_saturating(patched_cell_count));
+    }
 }
 
 #[cfg(debug_assertions)]
 fn increment_render_count_counter(counters: &mut TerminalRenderMetricsCounters) {
     counters.render_count = counters.render_count.saturating_add(1);
+}
+
+#[cfg(debug_assertions)]
+fn usize_to_u64_saturating(value: usize) -> u64 {
+    u64::try_from(value).unwrap_or(u64::MAX)
 }
 
 fn pane_cache_update_strategy(
@@ -524,10 +540,10 @@ impl TerminalView {
         cells: &mut PaneRenderCells,
         spans: &[TerminalDirtySpan],
         context: PaneCellBuildContext<'_>,
-    ) {
+    ) -> usize {
         if !pane_render_cells_match_dimensions(cells, cols, rows) {
             *cells = self.rebuild_pane_render_cache(terminal, cols, rows, display_offset, context);
-            return;
+            return 0;
         }
 
         let mut updates = Vec::new();
@@ -573,10 +589,12 @@ impl TerminalView {
         });
 
         if updates.is_empty() {
-            return;
+            return 0;
         }
 
+        let patched_cell_count = updates.len();
         *cells = merge_pane_render_rows(cells, rows, cols, updates);
+        patched_cell_count
     }
 
     fn update_pane_render_cache(
@@ -588,6 +606,7 @@ impl TerminalView {
         cache: &mut TerminalPaneRenderCache,
         cache_key: TerminalPaneRenderCacheKey,
         context: PaneCellBuildContext<'_>,
+        #[cfg(debug_assertions)] render_pass_cache_counts: &mut RenderPassCacheStrategyCounts,
     ) -> (PaneRenderCells, PaneCacheUpdateStrategy) {
         let damage = terminal.take_damage_snapshot();
         let strategy = pane_cache_update_strategy(
@@ -618,7 +637,7 @@ impl TerminalView {
                     cache.key = Some(cache_key);
                     return (cache.cells.clone(), PaneCacheUpdateStrategy::Full);
                 };
-                self.patch_pane_render_cache(
+                let patched_cell_count = self.patch_pane_render_cache(
                     terminal,
                     cols,
                     rows,
@@ -627,6 +646,8 @@ impl TerminalView {
                     &spans,
                     context,
                 );
+                #[cfg(debug_assertions)]
+                render_pass_cache_counts.record_partial_work(spans.len(), patched_cell_count);
             }
         }
 
@@ -709,6 +730,16 @@ impl TerminalView {
             .counters
             .cache_reuse_count
             .saturating_add(cache_counts.reuse);
+        self.render_metrics.counters.dirty_span_count = self
+            .render_metrics
+            .counters
+            .dirty_span_count
+            .saturating_add(cache_counts.dirty_span_count);
+        self.render_metrics.counters.patched_cell_count = self
+            .render_metrics
+            .counters
+            .patched_cell_count
+            .saturating_add(cache_counts.patched_cell_count);
     }
 
     #[cfg(debug_assertions)]
@@ -737,19 +768,23 @@ impl TerminalView {
             .unwrap_or(0);
 
         log::info!(
-            "render_metrics dt_ms={} render={} grid_paint={} full={} partial={} reuse={} shape_line={} total_render={} total_grid_paint={} total_full={} total_partial={} total_reuse={} total_shape_line={}",
+            "render_metrics dt_ms={} render={} grid_paint={} full={} partial={} reuse={} dirty_span={} patched_cell={} shape_line={} total_render={} total_grid_paint={} total_full={} total_partial={} total_reuse={} total_dirty_span={} total_patched_cell={} total_shape_line={}",
             dt_ms,
             counters_delta.render_count,
             terminal_ui_delta.grid_paint_count,
             counters_delta.cache_full_count,
             counters_delta.cache_partial_count,
             counters_delta.cache_reuse_count,
+            counters_delta.dirty_span_count,
+            counters_delta.patched_cell_count,
             terminal_ui_delta.shape_line_calls,
             self.render_metrics.counters.render_count,
             terminal_ui_snapshot.grid_paint_count,
             self.render_metrics.counters.cache_full_count,
             self.render_metrics.counters.cache_partial_count,
             self.render_metrics.counters.cache_reuse_count,
+            self.render_metrics.counters.dirty_span_count,
+            self.render_metrics.counters.patched_cell_count,
             terminal_ui_snapshot.shape_line_calls,
         );
 
@@ -1303,6 +1338,8 @@ impl Render for TerminalView {
                             selection_range: pane_cache_key.selection_range,
                             pane_search_results,
                         },
+                        #[cfg(debug_assertions)]
+                        &mut render_pass_cache_counts,
                     )
                 };
                 #[cfg(debug_assertions)]
@@ -2268,6 +2305,15 @@ mod tests {
         assert_eq!(counts.reuse, 0);
         assert_eq!(counts.partial, 0);
         assert_eq!(counts.full, 1);
+    }
+
+    #[cfg(debug_assertions)]
+    #[test]
+    fn record_partial_work_tracks_dirty_spans_and_patched_cells() {
+        let mut counts = RenderPassCacheStrategyCounts::default();
+        counts.record_partial_work(3, 12);
+        assert_eq!(counts.dirty_span_count, 3);
+        assert_eq!(counts.patched_cell_count, 12);
     }
 
     #[cfg(debug_assertions)]
