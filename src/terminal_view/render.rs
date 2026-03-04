@@ -703,7 +703,10 @@ impl TerminalView {
                     paint_damage = TerminalGridPaintDamage::Full;
                 } else {
                     #[cfg(debug_assertions)]
-                    render_pass_cache_counts.record_partial_work(spans.len(), patched_cell_count);
+                    if patched_cell_count > 0 {
+                        render_pass_cache_counts
+                            .record_partial_work(spans.len(), patched_cell_count);
+                    }
                 }
             }
         }

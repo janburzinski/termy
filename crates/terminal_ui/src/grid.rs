@@ -700,7 +700,11 @@ impl TerminalGrid {
             ));
         }
 
-        self.paint_cursor_for_row(row, origin, window);
+        // Keep block cursors beneath glyphs, but paint line cursors on top so text/block ops
+        // cannot overdraw the line.
+        if self.cursor_style == TerminalCursorStyle::Block {
+            self.paint_cursor_for_row(row, origin, window);
+        }
 
         for op in &row_ops.draw_ops {
             match op {
@@ -741,6 +745,10 @@ impl TerminalGrid {
                     paint_block_element_quad(window, cell_bounds, block.geometry, block.fg);
                 }
             }
+        }
+
+        if self.cursor_style == TerminalCursorStyle::Line {
+            self.paint_cursor_for_row(row, origin, window);
         }
     }
 
