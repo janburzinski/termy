@@ -1,8 +1,8 @@
 use super::scrollbar as terminal_scrollbar;
 use super::*;
+use crate::ui::scrollbar::{self as ui_scrollbar, ScrollbarPaintStyle};
 use alacritty_terminal::grid::Dimensions;
 use alacritty_terminal::index::{Column, Line};
-use crate::ui::scrollbar::{self as ui_scrollbar, ScrollbarPaintStyle};
 use gpui::prelude::FluentBuilder;
 use std::sync::Arc;
 
@@ -72,7 +72,9 @@ fn pane_cache_update_strategy(
     }
     match damage {
         TerminalDamageSnapshot::Full => PaneCacheUpdateStrategy::Full,
-        TerminalDamageSnapshot::Partial(spans) if spans.is_empty() => PaneCacheUpdateStrategy::Reuse,
+        TerminalDamageSnapshot::Partial(spans) if spans.is_empty() => {
+            PaneCacheUpdateStrategy::Reuse
+        }
         TerminalDamageSnapshot::Partial(_) => PaneCacheUpdateStrategy::Partial,
     }
 }
@@ -190,11 +192,13 @@ fn effective_pane_focus_active_border_alpha(
     runtime_uses_tmux: bool,
     tmux_show_active_pane_border: bool,
 ) -> f32 {
-    if runtime_uses_tmux && !tmux_show_active_pane_border {
-        0.0
-    } else {
-        active_border_alpha
+    if !runtime_uses_tmux {
+        return 0.0;
     }
+    if !tmux_show_active_pane_border {
+        return 0.0;
+    }
+    active_border_alpha
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -205,7 +209,9 @@ struct TerminalScrollbarOverlayFrame {
     height: f32,
 }
 
-fn terminal_scrollbar_overlay_frame(surface: TerminalViewportGeometry) -> TerminalScrollbarOverlayFrame {
+fn terminal_scrollbar_overlay_frame(
+    surface: TerminalViewportGeometry,
+) -> TerminalScrollbarOverlayFrame {
     let surface_width = surface.width.max(0.0);
     let effective_gutter = TERMINAL_SCROLLBAR_GUTTER_WIDTH.min(surface_width);
     let left = (surface.origin_x + surface_width - effective_gutter).max(surface.origin_x);
@@ -297,7 +303,10 @@ impl TerminalView {
     ) -> TerminalPaneRenderCacheKey {
         let (search_results_revision, search_position) = if search_active && is_active_pane {
             let results = self.search_state.results();
-            (Some(self.search_state.results_revision()), results.position())
+            (
+                Some(self.search_state.results_revision()),
+                results.position(),
+            )
         } else {
             (None, None)
         };
@@ -382,9 +391,8 @@ impl TerminalView {
             return Arc::new((0..rows).map(|_| Arc::new(Vec::new())).collect());
         }
 
-        let mut row_cells: Vec<Vec<CellRenderInfo>> = (0..rows)
-            .map(|_| Vec::with_capacity(cols))
-            .collect();
+        let mut row_cells: Vec<Vec<CellRenderInfo>> =
+            (0..rows).map(|_| Vec::with_capacity(cols)).collect();
         let mut expected_row = 0usize;
         let mut expected_col = 0usize;
         let mut ordering_failed = false;
@@ -398,7 +406,8 @@ impl TerminalView {
                     ordering_failed = true;
                     return;
                 }
-                let Some(row) = Self::viewport_row_from_term_line(term_line, cell_display_offset) else {
+                let Some(row) = Self::viewport_row_from_term_line(term_line, cell_display_offset)
+                else {
                     ordering_failed = true;
                     return;
                 };
@@ -407,8 +416,13 @@ impl TerminalView {
                     return;
                 }
 
-                row_cells[row]
-                    .push(self.build_cell_render_info(col, row, term_line, cell_content, context));
+                row_cells[row].push(self.build_cell_render_info(
+                    col,
+                    row,
+                    term_line,
+                    cell_content,
+                    context,
+                ));
 
                 expected_col += 1;
                 if expected_col == cols {
@@ -470,7 +484,8 @@ impl TerminalView {
                 if cell_display_offset != display_offset || col >= cols {
                     return;
                 }
-                let Some(row) = Self::viewport_row_from_term_line(term_line, cell_display_offset) else {
+                let Some(row) = Self::viewport_row_from_term_line(term_line, cell_display_offset)
+                else {
                     return;
                 };
                 if row >= rows {
@@ -571,7 +586,8 @@ impl TerminalView {
         match strategy {
             PaneCacheUpdateStrategy::Reuse => {}
             PaneCacheUpdateStrategy::Full => {
-                cache.cells = self.rebuild_pane_render_cache(terminal, cols, rows, display_offset, context);
+                cache.cells =
+                    self.rebuild_pane_render_cache(terminal, cols, rows, display_offset, context);
             }
             PaneCacheUpdateStrategy::Partial => {
                 let TerminalDamageSnapshot::Partial(spans) = damage else {
@@ -1148,7 +1164,8 @@ impl Render for TerminalView {
                 }
                 let is_active_pane = active_pane_id.as_deref() == Some(pane.id.as_str());
                 let (pane_inactive_focus, pane_active_focus) = if pane_focus_enabled {
-                    if let Some((from_pane_id, to_pane_id, progress)) = pane_focus_transition.as_ref()
+                    if let Some((from_pane_id, to_pane_id, progress)) =
+                        pane_focus_transition.as_ref()
                     {
                         if pane.id == *from_pane_id {
                             (*progress, 1.0 - *progress)
@@ -1167,19 +1184,19 @@ impl Render for TerminalView {
                 };
                 let (pane_focus_transform, raw_pane_active_border_alpha) =
                     if let Some((preset, strength)) = pane_focus_config {
-                    let inactive_scale = strength * pane_inactive_focus;
-                    let active_scale = strength * pane_active_focus;
-                    (
-                        CellColorTransform {
-                            fg_blend: preset.inactive_fg_blend * inactive_scale,
-                            bg_blend: preset.inactive_bg_blend * inactive_scale,
-                            desaturate: preset.inactive_desaturate * inactive_scale,
-                        },
-                        preset.active_border_alpha * active_scale,
-                    )
-                } else {
-                    (CellColorTransform::default(), 0.0)
-                };
+                        let inactive_scale = strength * pane_inactive_focus;
+                        let active_scale = strength * pane_active_focus;
+                        (
+                            CellColorTransform {
+                                fg_blend: preset.inactive_fg_blend * inactive_scale,
+                                bg_blend: preset.inactive_bg_blend * inactive_scale,
+                                desaturate: preset.inactive_desaturate * inactive_scale,
+                            },
+                            preset.active_border_alpha * active_scale,
+                        )
+                    } else {
+                        (CellColorTransform::default(), 0.0)
+                    };
                 // Palette backdrop uses the same inactive-pane transform path to keep one
                 // consistent dimming model and avoid a separate full-screen color overlay.
                 let cell_color_transform =
@@ -1270,11 +1287,13 @@ impl Render for TerminalView {
 
                 // Keep divider-boundary comparisons in the same geometry space as the
                 // pane pixels computed above to avoid drift from mixed sources.
-                let pane_right_cells =
-                    ((pane_left + pane_width - effective_padding_x) / cell_width).round().max(0.0) as u32;
-                let pane_bottom_cells =
-                    ((pane_top + pane_height - effective_padding_y) / cell_height).round().max(0.0)
-                        as u32;
+                let pane_right_cells = ((pane_left + pane_width - effective_padding_x) / cell_width)
+                    .round()
+                    .max(0.0) as u32;
+                let pane_bottom_cells = ((pane_top + pane_height - effective_padding_y)
+                    / cell_height)
+                    .round()
+                    .max(0.0) as u32;
 
                 if multi_pane && pane_right_cells < max_right_cells {
                     if let Some(gap_cells) = Self::pane_right_gap_cells(pane, &active_tab.panes) {
@@ -1321,7 +1340,7 @@ impl Render for TerminalView {
                         .into_any_element(),
                 );
 
-                if pane_active_border_alpha > f32::EPSILON {
+                if multi_pane && pane_active_border_alpha > f32::EPSILON {
                     let mut accent = blend_rgb_only(colors.cursor, colors.foreground, 0.18);
                     accent.a = self.scaled_chrome_alpha(pane_active_border_alpha);
                     let accent_hsla: gpui::Hsla = accent.into();
@@ -1350,7 +1369,10 @@ impl Render for TerminalView {
                     };
                     pane_focus_accents.push(
                         div()
-                            .id(SharedString::from(format!("pane-degraded-accent-{}", pane.id)))
+                            .id(SharedString::from(format!(
+                                "pane-degraded-accent-{}",
+                                pane.id
+                            )))
                             .absolute()
                             .left(px(pane_left))
                             .top(px(pane_top))
@@ -1728,7 +1750,6 @@ impl Render for TerminalView {
                     .on_action(cx.listener(Self::handle_import_colors_action))
                     .on_action(cx.listener(Self::handle_switch_theme_action))
                     .on_action(cx.listener(Self::handle_app_info_action))
-                    .on_action(cx.listener(Self::handle_native_sdk_example_action))
                     .on_action(cx.listener(Self::handle_restart_app_action))
                     .on_action(cx.listener(Self::handle_rename_tab_action))
                     .on_action(cx.listener(Self::handle_check_for_updates_action))
@@ -1740,19 +1761,18 @@ impl Render for TerminalView {
                     .on_action(cx.listener(Self::handle_switch_tab_left_action))
                     .on_action(cx.listener(Self::handle_switch_tab_right_action))
                     .on_action(cx.listener(Self::handle_manage_tmux_sessions_action))
-                    // GPUI grays out unavailable menu actions, so we only register
-                    // File menu pane handlers when the tmux runtime is active.
+                    .on_action(cx.listener(Self::handle_split_pane_vertical_action))
+                    .on_action(cx.listener(Self::handle_split_pane_horizontal_action))
+                    .on_action(cx.listener(Self::handle_close_pane_action))
+                    .on_action(cx.listener(Self::handle_focus_pane_next_action))
+                    .on_action(cx.listener(Self::handle_focus_pane_left_action))
+                    .on_action(cx.listener(Self::handle_focus_pane_right_action))
+                    .on_action(cx.listener(Self::handle_focus_pane_up_action))
+                    .on_action(cx.listener(Self::handle_focus_pane_down_action))
+                    .on_action(cx.listener(Self::handle_focus_pane_previous_action))
+                    // Resize/zoom remain tmux-only actions.
                     .when(self.runtime_uses_tmux(), |s| {
-                        s.on_action(cx.listener(Self::handle_split_pane_vertical_action))
-                            .on_action(cx.listener(Self::handle_split_pane_horizontal_action))
-                            .on_action(cx.listener(Self::handle_close_pane_action))
-                            .on_action(cx.listener(Self::handle_focus_pane_next_action))
-                            .on_action(cx.listener(Self::handle_focus_pane_left_action))
-                            .on_action(cx.listener(Self::handle_focus_pane_right_action))
-                            .on_action(cx.listener(Self::handle_focus_pane_up_action))
-                            .on_action(cx.listener(Self::handle_focus_pane_down_action))
-                            .on_action(cx.listener(Self::handle_focus_pane_previous_action))
-                            .on_action(cx.listener(Self::handle_resize_pane_left_action))
+                        s.on_action(cx.listener(Self::handle_resize_pane_left_action))
                             .on_action(cx.listener(Self::handle_resize_pane_right_action))
                             .on_action(cx.listener(Self::handle_resize_pane_up_action))
                             .on_action(cx.listener(Self::handle_resize_pane_down_action))
@@ -1964,13 +1984,8 @@ mod tests {
             a: 1.0,
         };
 
-        let (next_fg, next_bg) = apply_cell_color_transform(
-            fg,
-            bg,
-            CellColorTransform::default(),
-            fg_target,
-            bg_target,
-        );
+        let (next_fg, next_bg) =
+            apply_cell_color_transform(fg, bg, CellColorTransform::default(), fg_target, bg_target);
 
         assert_eq!(next_fg, fg);
         assert_eq!(next_bg, bg);
@@ -2005,7 +2020,10 @@ mod tests {
         let base = tmux_test_pane("%1", 0, 0, 10, 6);
         let adjacent = tmux_test_pane("%2", 10, 2, 5, 2);
         let panes = vec![base, adjacent];
-        assert_eq!(TerminalView::pane_right_gap_cells(&panes[0], &panes), Some(0));
+        assert_eq!(
+            TerminalView::pane_right_gap_cells(&panes[0], &panes),
+            Some(0)
+        );
     }
 
     #[test]
@@ -2023,7 +2041,10 @@ mod tests {
         let near = tmux_test_pane("%3", 12, 1, 3, 2);
         let non_overlap = tmux_test_pane("%4", 11, 7, 3, 2);
         let panes = vec![base, far, near, non_overlap];
-        assert_eq!(TerminalView::pane_right_gap_cells(&panes[0], &panes), Some(2));
+        assert_eq!(
+            TerminalView::pane_right_gap_cells(&panes[0], &panes),
+            Some(2)
+        );
     }
 
     #[test]
@@ -2031,7 +2052,10 @@ mod tests {
         let base = tmux_test_pane("%1", 0, 0, 10, 6);
         let adjacent = tmux_test_pane("%2", 2, 6, 3, 3);
         let panes = vec![base, adjacent];
-        assert_eq!(TerminalView::pane_bottom_gap_cells(&panes[0], &panes), Some(0));
+        assert_eq!(
+            TerminalView::pane_bottom_gap_cells(&panes[0], &panes),
+            Some(0)
+        );
     }
 
     #[test]
@@ -2049,7 +2073,10 @@ mod tests {
         let near = tmux_test_pane("%3", 3, 8, 2, 2);
         let non_overlap = tmux_test_pane("%4", 11, 9, 2, 2);
         let panes = vec![base, far, near, non_overlap];
-        assert_eq!(TerminalView::pane_bottom_gap_cells(&panes[0], &panes), Some(2));
+        assert_eq!(
+            TerminalView::pane_bottom_gap_cells(&panes[0], &panes),
+            Some(2)
+        );
     }
 
     #[test]

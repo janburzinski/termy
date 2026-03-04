@@ -615,7 +615,6 @@ impl TerminalView {
             | CommandAction::SwitchTheme
             | CommandAction::ManageTmuxSessions
             | CommandAction::AppInfo
-            | CommandAction::NativeSdkExample
             | CommandAction::RestartApp
             | CommandAction::RenameTab
             | CommandAction::MoveTabLeft
@@ -777,24 +776,22 @@ mod tests {
     }
 
     #[test]
-    fn tmux_commands_are_present_but_disabled_when_tmux_runtime_is_off() {
+    fn tmux_only_commands_are_present_but_disabled_when_tmux_runtime_is_off() {
         let items = TerminalView::command_palette_command_items_for_state(false, false);
-        let split = items
-            .iter()
-            .find_map(|item| match item.kind {
-                CommandPaletteItemKind::Command(CommandAction::SplitPaneVertical) => Some(item),
-                _ => None,
-            });
+        let resize = items.iter().find_map(|item| match item.kind {
+            CommandPaletteItemKind::Command(CommandAction::ResizePaneLeft) => Some(item),
+            _ => None,
+        });
         #[cfg(not(target_os = "windows"))]
         {
-            let split = split.expect("missing split pane command");
-            assert!(!split.enabled);
-            assert_eq!(split.status_hint, Some("tmux required"));
+            let resize = resize.expect("missing resize pane command");
+            assert!(!resize.enabled);
+            assert_eq!(resize.status_hint, Some("tmux required"));
         }
         #[cfg(target_os = "windows")]
         assert!(
-            split.is_none(),
-            "split pane command should be hidden from Windows command palette"
+            resize.is_none(),
+            "resize pane command should be hidden from Windows command palette"
         );
     }
 
@@ -814,7 +811,7 @@ mod tests {
     fn tmux_disabled_message_matches_expected_copy() {
         assert_eq!(
             TerminalView::command_palette_disabled_action_message_for_state(
-                CommandAction::SplitPaneVertical,
+                CommandAction::ResizePaneLeft,
                 true,
                 false,
             ),

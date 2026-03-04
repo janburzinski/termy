@@ -1,8 +1,8 @@
 use std::path::PathBuf;
 
 use termy_command_core::{
-    CommandCapabilities, CommandId, CommandUnavailableReason, KeybindLineRef, default_resolved_keybinds,
-    parse_keybind_directives_from_iter, resolve_keybinds,
+    CommandCapabilities, CommandId, CommandUnavailableReason, KeybindLineRef,
+    default_resolved_keybinds, parse_keybind_directives_from_iter, resolve_keybinds,
 };
 use termy_config_core::{AppConfig, config_path};
 use termy_theme_core::{ANSI_COLOR_NAMES, format_hex};
@@ -178,13 +178,11 @@ fn command_capabilities(tmux_enabled: bool, install_cli_available: bool) -> Comm
     }
 }
 
-fn command_metadata_for_id(
-    id: CommandId,
-    capabilities: CommandCapabilities,
-) -> (bool, bool, bool) {
+fn command_metadata_for_id(id: CommandId, capabilities: CommandCapabilities) -> (bool, bool, bool) {
     let availability = id.availability(capabilities);
     let tmux_required = id.is_tmux_only();
-    let restart_required = availability.reason == Some(CommandUnavailableReason::RequiresTmuxRuntime);
+    let restart_required =
+        availability.reason == Some(CommandUnavailableReason::RequiresTmuxRuntime);
     (availability.enabled, tmux_required, restart_required)
 }
 
@@ -274,8 +272,9 @@ fn list_fonts_impl() -> Vec<String> {
 #[cfg(test)]
 mod tests {
     use super::{
-        action_lines_for_capabilities, action_lines_for_tmux_enabled, keybind_lines_for_capabilities,
-        keybind_lines_for_tmux_enabled, list_theme_lines, resolve_keybinds_for_lines,
+        action_lines_for_capabilities, action_lines_for_tmux_enabled,
+        keybind_lines_for_capabilities, keybind_lines_for_tmux_enabled, list_theme_lines,
+        resolve_keybinds_for_lines,
     };
     use termy_command_core::{
         CommandId, KeybindLineRef, default_resolved_keybinds, parse_keybind_directives_from_iter,
@@ -307,13 +306,13 @@ mod tests {
     #[test]
     fn list_actions_includes_tmux_metadata_when_runtime_is_disabled() {
         let actions = action_lines_for_tmux_enabled(false);
-        let split_pane_line = actions
+        let resize_pane_line = actions
             .iter()
-            .find(|line| line.starts_with(CommandId::SplitPaneVertical.config_name()))
-            .expect("missing split_pane_vertical action metadata");
-        assert!(split_pane_line.contains("available=false"));
-        assert!(split_pane_line.contains("tmux_required=true"));
-        assert!(split_pane_line.contains("restart_required=true"));
+            .find(|line| line.starts_with(CommandId::ResizePaneLeft.config_name()))
+            .expect("missing resize_pane_left action metadata");
+        assert!(resize_pane_line.contains("available=false"));
+        assert!(resize_pane_line.contains("tmux_required=true"));
+        assert!(resize_pane_line.contains("restart_required=true"));
     }
 
     #[test]
@@ -331,13 +330,13 @@ mod tests {
     #[test]
     fn list_actions_reports_restart_not_required_when_tmux_runtime_is_active() {
         let actions = action_lines_for_capabilities(true, true);
-        let split_pane_line = actions
+        let resize_pane_line = actions
             .iter()
-            .find(|line| line.starts_with(CommandId::SplitPaneVertical.config_name()))
-            .expect("missing split_pane_vertical action metadata");
-        assert!(split_pane_line.contains("available=true"));
-        assert!(split_pane_line.contains("tmux_required=true"));
-        assert!(split_pane_line.contains("restart_required=false"));
+            .find(|line| line.starts_with(CommandId::ResizePaneLeft.config_name()))
+            .expect("missing resize_pane_left action metadata");
+        assert!(resize_pane_line.contains("available=true"));
+        assert!(resize_pane_line.contains("tmux_required=true"));
+        assert!(resize_pane_line.contains("restart_required=false"));
     }
 
     #[test]
@@ -370,13 +369,13 @@ mod tests {
     #[test]
     fn list_keybinds_includes_tmux_metadata_when_runtime_is_disabled() {
         let keybind_lines = keybind_lines_for_tmux_enabled(&[], false);
-        let split_pane_line = keybind_lines
+        let resize_pane_line = keybind_lines
             .iter()
-            .find(|line| line.starts_with("secondary-d = split_pane_vertical"))
-            .expect("missing secondary-d split pane keybind metadata");
-        assert!(split_pane_line.contains("available=false"));
-        assert!(split_pane_line.contains("tmux_required=true"));
-        assert!(split_pane_line.contains("restart_required=true"));
+            .find(|line| line.starts_with("secondary-alt-shift-left = resize_pane_left"))
+            .expect("missing secondary-alt-shift-left resize pane keybind metadata");
+        assert!(resize_pane_line.contains("available=false"));
+        assert!(resize_pane_line.contains("tmux_required=true"));
+        assert!(resize_pane_line.contains("restart_required=true"));
     }
 
     #[test]
@@ -403,18 +402,18 @@ mod tests {
         let keybind_lines = keybind_lines_for_capabilities(
             &[KeybindConfigLine {
                 line_number: 1,
-                value: "Secondary-D=split_pane_vertical".to_string(),
+                value: "Secondary-Alt-Shift-Left=resize_pane_left".to_string(),
             }],
             true,
             true,
         );
-        let split_pane_line = keybind_lines
+        let resize_pane_line = keybind_lines
             .iter()
-            .find(|line| line.starts_with("secondary-d = split_pane_vertical"))
-            .expect("missing split_pane_vertical keybind metadata");
-        assert!(split_pane_line.contains("available=true"));
-        assert!(split_pane_line.contains("tmux_required=true"));
-        assert!(split_pane_line.contains("restart_required=false"));
+            .find(|line| line.starts_with("secondary-alt-shift-left = resize_pane_left"))
+            .expect("missing resize_pane_left keybind metadata");
+        assert!(resize_pane_line.contains("available=true"));
+        assert!(resize_pane_line.contains("tmux_required=true"));
+        assert!(resize_pane_line.contains("restart_required=false"));
     }
 
     #[test]

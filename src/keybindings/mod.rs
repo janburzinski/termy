@@ -262,7 +262,11 @@ mod tests {
 
         assert_eq!(first_copy.trigger, "ctrl-shift-c");
         assert_eq!(first_paste.trigger, "secondary-v");
-        assert!(reordered.iter().any(|binding| binding.trigger == "secondary-c"));
+        assert!(
+            reordered
+                .iter()
+                .any(|binding| binding.trigger == "secondary-c")
+        );
     }
 
     #[test]
@@ -282,19 +286,25 @@ mod tests {
 
         let (tmux_resolved, tmux_warnings) = resolve_keybinds_for_config(&config, true);
         assert!(tmux_warnings.is_empty());
-        assert!(tmux_resolved
-            .iter()
-            .any(|binding| binding.action.is_tmux_only()));
+        assert!(
+            tmux_resolved
+                .iter()
+                .any(|binding| binding.action.is_tmux_only())
+        );
 
         let (native_resolved, native_warnings) = resolve_keybinds_for_config(&config, false);
         assert_eq!(native_warnings.len(), 1);
         assert_eq!(native_warnings[0].line_number, 0);
-        assert!(native_warnings[0]
-            .message
-            .contains("tmux-only keybind(s) ignored while tmux is disabled"));
-        assert!(native_resolved
-            .iter()
-            .all(|binding| !binding.action.is_tmux_only()));
+        assert!(
+            native_warnings[0]
+                .message
+                .contains("tmux-only keybind(s) ignored while tmux is disabled")
+        );
+        assert!(
+            native_resolved
+                .iter()
+                .all(|binding| !binding.action.is_tmux_only())
+        );
     }
 
     #[test]
@@ -309,7 +319,7 @@ mod tests {
     }
 
     #[test]
-    fn keybind_resolution_emits_tmux_suppression_warning_when_tmux_disabled() {
+    fn keybind_resolution_keeps_non_tmux_actions_when_tmux_disabled() {
         let mut config = AppConfig::default();
         config.keybind_lines = vec![
             KeybindConfigLine {
@@ -323,11 +333,13 @@ mod tests {
         ];
 
         let (resolved, warnings) = resolve_keybinds_for_config(&config, false);
-        assert!(resolved.is_empty());
-        assert_eq!(warnings.len(), 1);
-        assert_eq!(warnings[0].line_number, 0);
-        assert!(warnings[0]
-            .message
-            .contains("1 tmux-only keybind(s) ignored while tmux is disabled"));
+        assert!(warnings.is_empty());
+        assert_eq!(
+            resolved,
+            vec![ResolvedKeybind {
+                trigger: "secondary-d".to_string(),
+                action: CommandId::SplitPaneVertical,
+            }]
+        );
     }
 }

@@ -52,7 +52,7 @@ mod tests {
             tmux_runtime_active: false,
             install_cli_available: true,
         };
-        let availability = CommandId::SplitPaneVertical.availability(caps);
+        let availability = CommandId::ResizePaneLeft.availability(caps);
         assert!(!availability.enabled);
         assert_eq!(
             availability.reason,

@@ -169,22 +169,29 @@ mod tests {
     fn tmux_only_keybind_warns_when_tmux_is_disabled() {
         let report = validate_contents(
             "tmux_enabled = false\n\
-             keybind = secondary-d=split_pane_vertical\n\
+             keybind = secondary-alt-shift-left=resize_pane_left\n\
              keybind = secondary-c=copy\n",
         );
 
-        assert!(report.errors.is_empty(), "unexpected errors: {:?}", report.errors);
+        assert!(
+            report.errors.is_empty(),
+            "unexpected errors: {:?}",
+            report.errors
+        );
         assert!(
             report.warnings.iter().any(|warning| {
                 warning.contains("Line 2:")
-                    && warning.contains("split_pane_vertical")
+                    && warning.contains("resize_pane_left")
                     && warning.contains("tmux_enabled=true")
             }),
             "expected tmux-only keybind warning, got {:?}",
             report.warnings
         );
         assert!(
-            !report.warnings.iter().any(|warning| warning.contains("copy")),
+            !report
+                .warnings
+                .iter()
+                .any(|warning| warning.contains("copy")),
             "non-tmux keybind should not warn: {:?}",
             report.warnings
         );
@@ -194,10 +201,18 @@ mod tests {
     fn tmux_only_keybind_does_not_warn_when_tmux_is_enabled() {
         let report = validate_contents(
             "tmux_enabled = true\n\
-             keybind = secondary-d=split_pane_vertical\n",
+             keybind = secondary-alt-shift-left=resize_pane_left\n",
         );
 
-        assert!(report.errors.is_empty(), "unexpected errors: {:?}", report.errors);
-        assert!(report.warnings.is_empty(), "unexpected warnings: {:?}", report.warnings);
+        assert!(
+            report.errors.is_empty(),
+            "unexpected errors: {:?}",
+            report.errors
+        );
+        assert!(
+            report.warnings.is_empty(),
+            "unexpected warnings: {:?}",
+            report.warnings
+        );
     }
 }

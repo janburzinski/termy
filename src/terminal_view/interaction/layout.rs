@@ -1,6 +1,91 @@
 use super::*;
 
 impl TerminalView {
+    fn scale_native_pane_edge(edge: u16, old_extent: u16, new_extent: u16) -> u16 {
+        if old_extent <= 1 || new_extent == 0 {
+            return 0;
+        }
+        if edge == 0 {
+            return 0;
+        }
+        if edge >= old_extent {
+            return new_extent;
+        }
+
+        let numerator = u32::from(edge) * u32::from(new_extent) + (u32::from(old_extent) / 2);
+        let scaled = numerator / u32::from(old_extent);
+        scaled.min(u32::from(new_extent)) as u16
+    }
+
+    fn sync_native_tab_pane_geometry(tab: &mut TerminalTab, cols: u16, rows: u16) {
+        if tab.panes.is_empty() {
+            return;
+        }
+
+        let cols = cols.max(1);
+        let rows = rows.max(1);
+
+        if tab.panes.len() == 1 {
+            if let Some(only) = tab.panes.first_mut() {
+                only.left = 0;
+                only.top = 0;
+                only.width = cols;
+                only.height = rows;
+                tab.active_pane_id = only.id.clone();
+            }
+            return;
+        }
+
+        let old_cols = tab
+            .panes
+            .iter()
+            .map(|pane| pane.left.saturating_add(pane.width))
+            .max()
+            .unwrap_or(cols)
+            .max(1);
+        let old_rows = tab
+            .panes
+            .iter()
+            .map(|pane| pane.top.saturating_add(pane.height))
+            .max()
+            .unwrap_or(rows)
+            .max(1);
+
+        for pane in &mut tab.panes {
+            let old_left = pane.left;
+            let old_top = pane.top;
+            let old_right = pane.left.saturating_add(pane.width);
+            let old_bottom = pane.top.saturating_add(pane.height);
+
+            let mut new_left =
+                Self::scale_native_pane_edge(old_left, old_cols, cols).min(cols.saturating_sub(1));
+            let mut new_top =
+                Self::scale_native_pane_edge(old_top, old_rows, rows).min(rows.saturating_sub(1));
+            let mut new_right = Self::scale_native_pane_edge(old_right, old_cols, cols).min(cols);
+            let mut new_bottom = Self::scale_native_pane_edge(old_bottom, old_rows, rows).min(rows);
+
+            if new_right <= new_left {
+                new_right = (new_left + 1).min(cols);
+                new_left = new_right.saturating_sub(1);
+            }
+            if new_bottom <= new_top {
+                new_bottom = (new_top + 1).min(rows);
+                new_top = new_bottom.saturating_sub(1);
+            }
+
+            pane.left = new_left;
+            pane.top = new_top;
+            pane.width = new_right.saturating_sub(new_left).max(1);
+            pane.height = new_bottom.saturating_sub(new_top).max(1);
+        }
+
+        if !tab.panes.iter().any(|pane| pane.id == tab.active_pane_id)
+            && let Some(pane) = tab.panes.first()
+        {
+            tab.active_pane_id = pane.id.clone();
+        }
+    }
+
     fn should_emit_tmux_resize_error_toast(&mut self, now: Instant) -> bool {
         let debounce_window = Duration::from_millis(TMUX_RESIZE_ERROR_TOAST_DEBOUNCE_MS);
         match self.last_tmux_resize_error_at {
@@ -20,10 +105,16 @@ impl TerminalView {
         let y: f32 = position.y.into();
         // Mouse coordinates arrive in window space; subtract chrome so terminal hit-testing
         // stays aligned with rendered rows in both native and tmux runtimes.
-        (x, Self::window_y_to_terminal_content_y(y, self.chrome_height()))
+        (
+            x,
+            Self::window_y_to_terminal_content_y(y, self.chrome_height()),
+        )
     }
 
-    pub(in super::super) fn window_y_to_terminal_content_y(window_y: f32, chrome_height: f32) -> f32 {
+    pub(in super::super) fn window_y_to_terminal_content_y(
+        window_y: f32,
+        chrome_height: f32,
+    ) -> f32 {
         window_y - chrome_height
     }
 
@@ -65,7 +156,11 @@ impl TerminalView {
         cx.notify();
     }
 
-    pub(in super::super) fn calculate_cell_size(&mut self, window: &mut Window, _cx: &App) -> Size<Pixels> {
+    pub(in super::super) fn calculate_cell_size(
+        &mut self,
+        window: &mut Window,
+        _cx: &App,
+    ) -> Size<Pixels> {
         if let Some(cell_size) = self.cell_size {
             return cell_size;
         }
@@ -94,7 +189,11 @@ impl TerminalView {
         cell_size
     }
 
-    pub(in super::super) fn sync_terminal_size(&mut self, window: &Window, cell_size: Size<Pixels>) {
+    pub(in super::super) fn sync_terminal_size(
+        &mut self,
+        window: &Window,
+        cell_size: Size<Pixels>,
+    ) {
         let (padding_x, padding_y) = self.effective_terminal_padding();
         let viewport = window.viewport_size();
         let viewport_width: f32 = viewport.width.into();
@@ -142,17 +241,7 @@ impl TerminalView {
             }
             RuntimeKind::Native => {
                 for tab in &mut self.tabs {
-                    for pane in &mut tab.panes {
-                        pane.left = 0;
-                        pane.top = 0;
-                        pane.width = cols.max(1);
-                        pane.height = rows.max(1);
-                    }
-                    if !tab.panes.iter().any(|pane| pane.id == tab.active_pane_id)
-                        && let Some(pane) = tab.panes.first()
-                    {
-                        tab.active_pane_id = pane.id.clone();
-                    }
+                    Self::sync_native_tab_pane_geometry(tab, cols, rows);
                 }
             }
         }
@@ -204,16 +293,25 @@ mod tests {
 
     #[test]
     fn window_y_to_terminal_content_y_subtracts_non_zero_chrome() {
-        assert_eq!(TerminalView::window_y_to_terminal_content_y(120.0, 34.0), 86.0);
+        assert_eq!(
+            TerminalView::window_y_to_terminal_content_y(120.0, 34.0),
+            86.0
+        );
     }
 
     #[test]
     fn window_y_to_terminal_content_y_is_identity_when_chrome_is_zero() {
-        assert_eq!(TerminalView::window_y_to_terminal_content_y(120.0, 0.0), 120.0);
+        assert_eq!(
+            TerminalView::window_y_to_terminal_content_y(120.0, 0.0),
+            120.0
+        );
     }
 
     #[test]
     fn window_y_to_terminal_content_y_can_be_negative_when_cursor_is_above_chrome() {
-        assert_eq!(TerminalView::window_y_to_terminal_content_y(20.0, 40.0), -20.0);
+        assert_eq!(
+            TerminalView::window_y_to_terminal_content_y(20.0, 40.0),
+            -20.0
+        );
     }
 }

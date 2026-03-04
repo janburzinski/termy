@@ -113,7 +113,6 @@ Related UI option:
 - `minimize_window`
 - `rename_tab`
 - `app_info`
-- `native_sdk_example`
 - `restart_app`
 - `open_config`
 - `open_settings`

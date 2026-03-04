@@ -26,7 +26,6 @@ impl CommandPaletteVisibility {
             Self::NotWindows => !is_windows,
         }
     }
-
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -71,7 +70,6 @@ impl MenuVisibility {
             Self::NotWindows => !is_windows,
         }
     }
-
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -353,12 +351,7 @@ define_commands!(
             MenuActionRole::Normal
         ))
     ),
-    (
-        CloseTab,
-        TERMINAL_CONTEXT,
-        None,
-        None
-    ),
+    (CloseTab, TERMINAL_CONTEXT, None, None),
     (
         ClosePaneOrTab,
         TERMINAL_CONTEXT,
@@ -662,16 +655,6 @@ define_commands!(
             MenuVisibility::Always,
             MenuActionRole::Normal
         ))
-    ),
-    (
-        NativeSdkExample,
-        TERMINAL_CONTEXT,
-        Some(palette(
-            "Native SDK Example",
-            "native sdk modal popup confirm dialog example",
-            CommandPaletteVisibility::Always
-        )),
-        None
     ),
     (
         RestartApp,
@@ -1254,7 +1237,7 @@ mod tests {
             tmux_runtime_active: false,
             install_cli_available: true,
         };
-        let availability = CommandAction::SplitPaneVertical.availability(caps);
+        let availability = CommandAction::ResizePaneLeft.availability(caps);
         assert!(!availability.enabled);
         assert_eq!(
             availability.reason,
@@ -1286,15 +1269,6 @@ mod tests {
         actual.sort_unstable();
 
         let mut expected = vec![
-            "split_pane_vertical",
-            "split_pane_horizontal",
-            "close_pane",
-            "focus_pane_left",
-            "focus_pane_right",
-            "focus_pane_up",
-            "focus_pane_down",
-            "focus_pane_next",
-            "focus_pane_previous",
             "resize_pane_left",
             "resize_pane_right",
             "resize_pane_up",

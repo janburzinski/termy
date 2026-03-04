@@ -76,8 +76,9 @@ impl TerminalView {
                     self.open_command_palette_in_mode(mode, cx);
                 }
             }
-            CommandAction::ManageTmuxSessions => self
-                .open_tmux_session_palette_with_intent(TmuxSessionIntent::AttachOrSwitch, cx),
+            CommandAction::ManageTmuxSessions => {
+                self.open_tmux_session_palette_with_intent(TmuxSessionIntent::AttachOrSwitch, cx)
+            }
             CommandAction::Quit => {
                 self.execute_quit_command_action(action, window, cx);
             }
@@ -85,7 +86,6 @@ impl TerminalView {
             CommandAction::OpenConfig
             | CommandAction::ImportColors
             | CommandAction::AppInfo
-            | CommandAction::NativeSdkExample
             | CommandAction::OpenSettings
             | CommandAction::CheckForUpdates => {
                 self.execute_app_system_command_action(action, cx);
@@ -181,15 +181,6 @@ impl TerminalView {
         cx: &mut Context<Self>,
     ) {
         self.execute_command_action(CommandAction::AppInfo, true, window, cx);
-    }
-
-    pub(in super::super) fn handle_native_sdk_example_action(
-        &mut self,
-        _: &commands::NativeSdkExample,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        self.execute_command_action(CommandAction::NativeSdkExample, true, window, cx);
     }
 
     pub(in super::super) fn handle_restart_app_action(

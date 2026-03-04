@@ -27,7 +27,6 @@ macro_rules! termy_command_catalog {
             (MinimizeWindow, "minimize_window"),
             (RenameTab, "rename_tab"),
             (AppInfo, "app_info"),
-            (NativeSdkExample, "native_sdk_example"),
             (RestartApp, "restart_app"),
             (OpenConfig, "open_config"),
             (OpenSettings, "open_settings"),
@@ -103,16 +102,7 @@ macro_rules! define_command_catalog {
             pub const fn is_tmux_only(self) -> bool {
                 matches!(
                     self,
-                    Self::SplitPaneVertical
-                        | Self::SplitPaneHorizontal
-                        | Self::ClosePane
-                        | Self::FocusPaneLeft
-                        | Self::FocusPaneRight
-                        | Self::FocusPaneUp
-                        | Self::FocusPaneDown
-                        | Self::FocusPaneNext
-                        | Self::FocusPanePrevious
-                        | Self::ResizePaneLeft
+                    Self::ResizePaneLeft
                         | Self::ResizePaneRight
                         | Self::ResizePaneUp
                         | Self::ResizePaneDown
@@ -173,19 +163,10 @@ mod tests {
         actual.sort_unstable();
 
         let mut expected = vec![
-            "close_pane",
-            "focus_pane_down",
-            "focus_pane_left",
-            "focus_pane_next",
-            "focus_pane_previous",
-            "focus_pane_right",
-            "focus_pane_up",
             "resize_pane_down",
             "resize_pane_left",
             "resize_pane_right",
             "resize_pane_up",
-            "split_pane_horizontal",
-            "split_pane_vertical",
             "toggle_pane_zoom",
         ];
         expected.sort_unstable();

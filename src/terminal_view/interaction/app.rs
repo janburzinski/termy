@@ -19,10 +19,6 @@ impl TerminalView {
                 self.app_info_action(cx);
                 true
             }
-            CommandAction::NativeSdkExample => {
-                self.native_sdk_example_action(cx);
-                true
-            }
             CommandAction::OpenSettings => {
                 self.open_settings_action(cx);
                 true
@@ -91,31 +87,6 @@ impl TerminalView {
         );
         termy_toast::info(message);
         cx.notify();
-    }
-
-    fn native_sdk_example_action(&mut self, cx: &mut Context<Self>) {
-        cx.spawn(async move |this, cx: &mut AsyncApp| {
-            termy_native_sdk::show_alert(
-                "Update Available",
-                "A new Termy update is available and ready to install.",
-            );
-            let confirmed = termy_native_sdk::confirm(
-                "Install Update",
-                "Would you like to install the latest update now?",
-            );
-
-            let _ = cx.update(|cx| {
-                this.update(cx, |_view, cx| {
-                    if confirmed {
-                        termy_toast::success("Update install confirmed");
-                    } else {
-                        termy_toast::info("Update installation postponed");
-                    }
-                    cx.notify();
-                })
-            });
-        })
-        .detach();
     }
 
     fn open_settings_action(&mut self, cx: &mut Context<Self>) {

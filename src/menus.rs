@@ -1,14 +1,11 @@
 use crate::commands::{CommandAction, CommandMenuEntry, MenuRoot};
-use gpui::{Menu, MenuItem};
 #[cfg(target_os = "macos")]
 use gpui::SystemMenuType;
+use gpui::{Menu, MenuItem};
 use termy_command_core::{CommandAvailability, CommandCapabilities, CommandUnavailableReason};
 
 const INSTALL_CLI_TITLE: &str = "Install CLI";
 const INSTALL_CLI_INSTALLED_TITLE: &str = "Install CLI (Installed)";
-const SPLIT_PANE_VERTICAL_TMUX_REQUIRED_TITLE: &str = "Split Pane Vertical (tmux required)";
-const SPLIT_PANE_HORIZONTAL_TMUX_REQUIRED_TITLE: &str = "Split Pane Horizontal (tmux required)";
-const FOCUS_NEXT_PANE_TMUX_REQUIRED_TITLE: &str = "Focus Next Pane (tmux required)";
 
 pub(crate) fn app_menus(install_cli_available: bool, tmux_enabled: bool) -> Vec<Menu> {
     let capabilities = CommandCapabilities {
@@ -79,9 +76,7 @@ fn menu_item_title(
     }
 
     match availability.reason {
-        // Keep only the requested pane actions visible in native mode and label
-        // them explicitly so users understand why those rows are unavailable.
-        Some(CommandUnavailableReason::RequiresTmuxRuntime) => tmux_required_menu_title(entry.action),
+        Some(CommandUnavailableReason::RequiresTmuxRuntime) => None,
         Some(CommandUnavailableReason::InstallCliAlreadyInstalled) => {
             Some(INSTALL_CLI_INSTALLED_TITLE)
         }
@@ -89,22 +84,9 @@ fn menu_item_title(
     }
 }
 
-fn tmux_required_menu_title(action: CommandAction) -> Option<&'static str> {
-    match action {
-        CommandAction::SplitPaneVertical => Some(SPLIT_PANE_VERTICAL_TMUX_REQUIRED_TITLE),
-        CommandAction::SplitPaneHorizontal => Some(SPLIT_PANE_HORIZONTAL_TMUX_REQUIRED_TITLE),
-        CommandAction::FocusPaneNext => Some(FOCUS_NEXT_PANE_TMUX_REQUIRED_TITLE),
-        _ => None,
-    }
-}
-
 #[cfg(test)]
 mod tests {
-    use super::{
-        FOCUS_NEXT_PANE_TMUX_REQUIRED_TITLE, INSTALL_CLI_INSTALLED_TITLE, INSTALL_CLI_TITLE,
-        SPLIT_PANE_HORIZONTAL_TMUX_REQUIRED_TITLE, SPLIT_PANE_VERTICAL_TMUX_REQUIRED_TITLE,
-        app_menus,
-    };
+    use super::{INSTALL_CLI_INSTALLED_TITLE, INSTALL_CLI_TITLE, app_menus};
     use crate::commands::CommandAction;
     use gpui::{MenuItem, OsAction};
     use termy_command_core::{CommandCapabilities, CommandUnavailableReason};
@@ -215,7 +197,10 @@ mod tests {
                 .collect::<Vec<_>>()
         };
 
-        assert_eq!(install_cli_titles(&help_menu_available), [INSTALL_CLI_TITLE]);
+        assert_eq!(
+            install_cli_titles(&help_menu_available),
+            [INSTALL_CLI_TITLE]
+        );
         assert_eq!(
             install_cli_titles(&help_menu_installed),
             [INSTALL_CLI_INSTALLED_TITLE]
@@ -232,7 +217,7 @@ mod tests {
     }
 
     #[test]
-    fn file_menu_shows_tmux_required_pane_actions_when_tmux_is_disabled() {
+    fn file_menu_keeps_native_pane_actions_when_tmux_is_disabled() {
         let caps = CommandCapabilities {
             tmux_runtime_active: false,
             install_cli_available: true,
@@ -243,10 +228,8 @@ mod tests {
             CommandAction::FocusPaneNext,
         ] {
             let availability = action.availability(caps);
-            assert_eq!(
-                availability.reason,
-                Some(CommandUnavailableReason::RequiresTmuxRuntime)
-            );
+            assert!(availability.enabled);
+            assert_eq!(availability.reason, None);
         }
         let close_pane_or_tab_availability = CommandAction::ClosePaneOrTab.availability(caps);
         assert!(close_pane_or_tab_availability.enabled);
@@ -276,9 +259,9 @@ mod tests {
                 "<separator>",
                 "Close Pane or Tab",
                 "Tmux Sessions",
-                SPLIT_PANE_VERTICAL_TMUX_REQUIRED_TITLE,
-                SPLIT_PANE_HORIZONTAL_TMUX_REQUIRED_TITLE,
-                FOCUS_NEXT_PANE_TMUX_REQUIRED_TITLE,
+                "Split Pane Vertical",
+                "Split Pane Horizontal",
+                "Focus Next Pane",
             ]
             .into_iter()
             .map(ToString::to_string)
@@ -295,7 +278,7 @@ mod tests {
     }
 
     #[test]
-    fn tmux_only_actions_outside_requested_file_set_remain_hidden_when_tmux_is_disabled() {
+    fn tmux_only_actions_remain_hidden_when_tmux_is_disabled() {
         let all_menu_titles = app_menus(true, false)
             .into_iter()
             .flat_map(|menu| menu.items)
@@ -307,16 +290,9 @@ mod tests {
             })
             .collect::<Vec<_>>();
 
-        assert!(
-            !all_menu_titles.iter().any(|title| matches!(
-                title.as_str(),
-                "Split Pane Vertical"
-                    | "Split Pane Horizontal"
-                    | "Close Pane"
-                    | "Focus Next Pane"
-                    | "Focus Previous Pane"
-                    | "Toggle Pane Zoom"
-            ))
-        );
+        assert!(!all_menu_titles.iter().any(|title| matches!(
+            title.as_str(),
+            "Close Pane" | "Focus Previous Pane" | "Toggle Pane Zoom"
+        )));
     }
 }

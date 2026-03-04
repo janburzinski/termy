@@ -1,8 +1,8 @@
 use crate::colors::TerminalColors;
 use crate::commands::{self, CommandAction};
 use crate::config::{
-    self, AppConfig, CursorStyle as AppCursorStyle, TabCloseVisibility, TabTitleConfig,
-    PaneFocusEffect, TabTitleSource, TabWidthMode, TerminalScrollbarStyle,
+    self, AppConfig, CursorStyle as AppCursorStyle, PaneFocusEffect, TabCloseVisibility,
+    TabTitleConfig, TabTitleSource, TabWidthMode, TerminalScrollbarStyle,
     TerminalScrollbarVisibility,
 };
 use crate::keybindings;
@@ -1031,8 +1031,10 @@ impl TerminalView {
             .unwrap_or(DEFAULT_TAB_TITLE)
             .to_string();
         let title_text_width = 0.0;
-        let sticky_title_width =
-            Self::tab_display_width_for_text_px_without_close_with_max(title_text_width, TAB_MAX_WIDTH);
+        let sticky_title_width = Self::tab_display_width_for_text_px_without_close_with_max(
+            title_text_width,
+            TAB_MAX_WIDTH,
+        );
         let display_width =
             Self::tab_display_width_for_text_px_with_max(title_text_width, TAB_MAX_WIDTH);
         let pane_id = format!("%native-{tab_id}");
@@ -1081,7 +1083,9 @@ impl TerminalView {
     }
 
     fn active_pane_id(&self) -> Option<&str> {
-        self.tabs.get(self.active_tab).and_then(|tab| tab.active_pane_id())
+        self.tabs
+            .get(self.active_tab)
+            .and_then(|tab| tab.active_pane_id())
     }
 
     fn active_tab_ref(&self) -> Option<&TerminalTab> {
@@ -1179,8 +1183,9 @@ impl TerminalView {
             self.pane_focus_transition = None;
             return None;
         }
-        let progress =
-            pane_focus_ease_out(elapsed.as_secs_f32() / PANE_FOCUS_ANIMATION_DURATION.as_secs_f32());
+        let progress = pane_focus_ease_out(
+            elapsed.as_secs_f32() / PANE_FOCUS_ANIMATION_DURATION.as_secs_f32(),
+        );
         Some((
             transition.from_pane_id.clone(),
             transition.to_pane_id.clone(),
@@ -1722,7 +1727,10 @@ impl TerminalView {
         self.configured_working_dir = config.working_dir.clone();
         self.terminal_runtime = Self::runtime_config_from_app_config(&config);
         let reconnect_managed_tmux = self.runtime_uses_tmux()
-            && matches!(self.tmux_runtime().config.launch, TmuxLaunchTarget::Managed { .. });
+            && matches!(
+                self.tmux_runtime().config.launch,
+                TmuxLaunchTarget::Managed { .. }
+            );
         if reconnect_managed_tmux {
             self.reconnect_tmux_runtime(Self::tmux_runtime_from_app_config(&config));
         } else if self.runtime_uses_tmux() {
@@ -1907,30 +1915,36 @@ impl TerminalView {
         let active_tab = self.active_tab;
 
         for index in 0..self.tabs.len() {
-            let Some(terminal) = self.tabs[index].active_terminal() else {
-                continue;
-            };
-            let events = terminal.process_events();
-            for event in events {
-                match event {
-                    TerminalEvent::Wakeup | TerminalEvent::Bell | TerminalEvent::Exit => {
-                        if index == active_tab {
-                            should_redraw = true;
+            let active_pane_id = self.tabs[index].active_pane_id.clone();
+
+            for pane_index in 0..self.tabs[index].panes.len() {
+                let pane_id = self.tabs[index].panes[pane_index].id.clone();
+                let pane_is_active = pane_id == active_pane_id;
+                let events = self.tabs[index].panes[pane_index].terminal.process_events();
+
+                for event in events {
+                    match event {
+                        TerminalEvent::Wakeup | TerminalEvent::Bell | TerminalEvent::Exit => {
+                            if index == active_tab {
+                                should_redraw = true;
+                            }
                         }
-                    }
-                    TerminalEvent::Title(title) => {
-                        if self.apply_terminal_title(index, &title, cx) {
-                            should_redraw = true;
+                        TerminalEvent::Title(title) => {
+                            if pane_is_active && self.apply_terminal_title(index, &title, cx) {
+                                should_redraw = true;
+                            }
                         }
-                    }
-                    TerminalEvent::ResetTitle => {
-                        if self.clear_terminal_titles(index) {
-                            should_redraw = true;
+                        TerminalEvent::ResetTitle => {
+                            if pane_is_active && self.clear_terminal_titles(index) {
+                                should_redraw = true;
+                            }
                         }
-                    }
-                    TerminalEvent::ClipboardStore(text) => {
-                        self.pending_clipboard = Some(text);
-                        should_redraw = true;
+                        TerminalEvent::ClipboardStore(text) => {
+                            if index == active_tab && pane_is_active {
+                                self.pending_clipboard = Some(text);
+                                should_redraw = true;
+                            }
+                        }
                     }
                 }
             }
@@ -2088,12 +2102,10 @@ mod tests {
         let high_strength = pane_focus_strength_factor(0.8);
 
         assert!(
-            (preset.inactive_fg_blend * high_strength)
-                > (preset.inactive_fg_blend * low_strength)
+            (preset.inactive_fg_blend * high_strength) > (preset.inactive_fg_blend * low_strength)
         );
         assert!(
-            (preset.inactive_bg_blend * high_strength)
-                > (preset.inactive_bg_blend * low_strength)
+            (preset.inactive_bg_blend * high_strength) > (preset.inactive_bg_blend * low_strength)
         );
         assert!(
             (preset.active_border_alpha * high_strength)
