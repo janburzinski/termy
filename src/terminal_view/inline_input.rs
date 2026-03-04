@@ -23,6 +23,12 @@ enum InlineInputTarget {
     AiInput,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum InlineInputNotifyTarget {
+    Parent,
+    Overlay,
+}
+
 #[derive(Clone, Debug)]
 pub(super) struct InlineInputState {
     text: String,
@@ -862,6 +868,28 @@ impl IntoElement for InlineInputElement {
 }
 
 impl TerminalView {
+    fn inline_input_notify_target_for_target(target: InlineInputTarget) -> InlineInputNotifyTarget {
+        match target {
+            InlineInputTarget::CommandPalette | InlineInputTarget::AiInput => {
+                InlineInputNotifyTarget::Overlay
+            }
+            InlineInputTarget::RenameTab | InlineInputTarget::Search => {
+                InlineInputNotifyTarget::Parent
+            }
+        }
+    }
+
+    fn notify_for_inline_input_target(&mut self, target: InlineInputTarget, cx: &mut Context<Self>) {
+        match Self::inline_input_notify_target_for_target(target) {
+            InlineInputNotifyTarget::Parent => cx.notify(),
+            InlineInputNotifyTarget::Overlay => self.notify_overlay(cx),
+        }
+    }
+
+    pub(super) fn notify_search_inline_input(&mut self, cx: &mut Context<Self>) {
+        self.notify_for_inline_input_target(InlineInputTarget::Search, cx);
+    }
+
     fn active_inline_input_target(&self) -> Option<InlineInputTarget> {
         if self.is_command_palette_open() {
             Some(InlineInputTarget::CommandPalette)
@@ -941,7 +969,7 @@ impl TerminalView {
 
     pub(super) fn command_palette_query_changed(&mut self, cx: &mut Context<Self>) {
         self.refresh_command_palette_matches(true, cx);
-        cx.notify();
+        self.notify_for_inline_input_target(InlineInputTarget::CommandPalette, cx);
     }
 
     fn enforce_tab_rename_limit(&mut self) {
@@ -978,11 +1006,11 @@ impl TerminalView {
             Some(InlineInputTarget::RenameTab) => {
                 mutate(&mut self.rename_input);
                 self.enforce_tab_rename_limit();
-                cx.notify();
+                self.notify_for_inline_input_target(InlineInputTarget::RenameTab, cx);
             }
             Some(InlineInputTarget::AiInput) => {
                 mutate(self.ai_input_mut());
-                cx.notify();
+                self.notify_for_inline_input_target(InlineInputTarget::AiInput, cx);
             }
             None => {}
         }
@@ -1343,5 +1371,25 @@ mod tests {
 
         state.select_token_at_utf16(8);
         assert_eq!(state.selected_range(), 5..8);
+    }
+
+    #[test]
+    fn inline_input_notify_policy_matches_overlay_split() {
+        assert_eq!(
+            TerminalView::inline_input_notify_target_for_target(InlineInputTarget::CommandPalette),
+            InlineInputNotifyTarget::Overlay
+        );
+        assert_eq!(
+            TerminalView::inline_input_notify_target_for_target(InlineInputTarget::AiInput),
+            InlineInputNotifyTarget::Overlay
+        );
+        assert_eq!(
+            TerminalView::inline_input_notify_target_for_target(InlineInputTarget::Search),
+            InlineInputNotifyTarget::Parent
+        );
+        assert_eq!(
+            TerminalView::inline_input_notify_target_for_target(InlineInputTarget::RenameTab),
+            InlineInputNotifyTarget::Parent
+        );
     }
 }
