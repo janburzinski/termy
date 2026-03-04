@@ -9,7 +9,7 @@
     <a href="https://github.com/sponsors/lassejlv">Sponsor</a>
   </p>
   <p>
-    If you find Termy useful, <a href="https://github.com/sponsors/lassejlv">consider sponsorng</a>. It would help a lot.
+    If you find Termy useful, <a href="https://github.com/sponsors/lassejlv">consider sponsoring</a>. It would help a lot.
   </p>
 </div>
 

@@ -145,14 +145,14 @@ export function Hero({ release }: HeroProps): JSX.Element {
               </span>
             </div>
             <p className="text-sm text-muted-foreground">
-              If you find Termy useful, please{" "}
+              If you find Termy useful,{" "}
               <a
                 href="https://github.com/sponsors/lassejlv"
                 target="_blank"
                 rel="noreferrer"
                 className="underline underline-offset-4 hover:text-foreground transition-colors"
               >
-                sponsor the project
+                consider sponsoring
               </a>
               . It would help a lot.
             </p>
