@@ -14,20 +14,22 @@ function RootLayout() {
       </main>
 
       {/* Footer */}
-      <footer className="border-t border-border mt-24">
-        <div className="mx-auto max-w-6xl px-6 py-8">
+      <footer className="border-t border-border/30 mt-24">
+        <div className="mx-auto max-w-6xl px-6 py-6">
           <div className="flex flex-col md:flex-row items-center justify-between gap-4">
-            <div className="flex items-center gap-2 text-sm text-muted-foreground">
+            <div className="flex items-center gap-2 text-xs text-muted-foreground/50">
               <img
-                src="https://raw.githubusercontent.com/lassejlv/termy/refs/heads/main/assets/termy_icon.png"
+                src="/termy_icon.png"
                 alt="Termy"
-                className="h-5 w-5 rounded"
+                width={16}
+                height={16}
+                className="rounded-sm opacity-50"
               />
-              <span>Termy</span>
-              <span className="text-muted-foreground/50">·</span>
+              <span className="font-medium">Termy</span>
+              <span className="text-muted-foreground/20">/</span>
               <span>Open source terminal emulator</span>
             </div>
-            <div className="flex items-center gap-6 text-sm text-muted-foreground">
+            <div className="flex items-center gap-5 text-xs text-muted-foreground/40">
               <a
                 href="https://github.com/lassejlv/termy"
                 target="_blank"

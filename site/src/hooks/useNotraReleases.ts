@@ -39,7 +39,9 @@ export function useNotraChangelogs() {
 export function useNotraChangelogById(id: string) {
   return useQuery({
     queryKey: ["notra-changelog", id],
-    queryFn: () => fetchChangelogById(id),
-    enabled: !!id,
+    queryFn: function queryById() {
+      return fetchChangelogById(id);
+    },
+    enabled: Boolean(id),
   });
 }

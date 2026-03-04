@@ -5,9 +5,33 @@
 
 @custom-variant dark (&:is(.dark *));
 
+/* Outfit — local woff2 */
+@font-face {
+  font-family: "Outfit";
+  font-style: normal;
+  font-weight: 100 700;
+  font-display: swap;
+  src: url("/fonts/outfit-latin.woff2") format("woff2");
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6,
+    U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122,
+    U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+
+@font-face {
+  font-family: "Outfit";
+  font-style: normal;
+  font-weight: 100 700;
+  font-display: swap;
+  src: url("/fonts/outfit-latin-ext.woff2") format("woff2");
+  unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7,
+    U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F,
+    U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F,
+    U+A720-A7FF;
+}
+
 @theme {
-  --font-sans: "Geist", ui-sans-serif, system-ui, sans-serif;
-  --font-mono: "Geist Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+  --font-sans: "Outfit", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, Menlo, monospace;
 }
 
 @theme inline {
@@ -121,22 +145,82 @@
   opacity: 0;
 }
 
-/* Terminal window styling — minimal */
+/* Terminal window styling — matches Termy app */
 .terminal-window {
-  @apply rounded-2xl border border-border bg-card overflow-hidden;
-  box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.4);
+  @apply rounded-xl overflow-hidden;
+  background: #141a24;
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  box-shadow:
+    0 25px 50px -12px rgba(0, 0, 0, 0.5),
+    0 0 0 1px rgba(255, 255, 255, 0.03);
 }
 
 .light .terminal-window {
-  box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.1);
+  background: #f0f2f5;
+  border: 1px solid rgba(0, 0, 0, 0.1);
+  box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.12);
 }
 
 .terminal-header {
-  @apply flex items-center gap-2 px-4 py-3 border-b border-border;
+  @apply relative flex items-center px-4 py-2.5;
+  background: rgba(255, 255, 255, 0.02);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+.light .terminal-header {
+  background: rgba(0, 0, 0, 0.02);
+  border-bottom: 1px solid rgba(0, 0, 0, 0.06);
+}
+
+.terminal-header-title {
+  @apply absolute left-1/2 -translate-x-1/2 text-xs font-mono;
+  color: #5c6370;
+}
+
+.terminal-dots {
+  @apply flex items-center gap-[7px];
 }
 
 .terminal-dot {
-  @apply w-3 h-3 rounded-full;
+  @apply rounded-full;
+  width: 11px;
+  height: 11px;
+}
+
+.terminal-body {
+  @apply p-5 font-mono overflow-auto;
+  font-size: 12.5px;
+  background: #141a24;
+  max-height: 480px;
+  line-height: 1.25;
+  color: #d1d5db;
+}
+
+.light .terminal-body {
+  background: #f0f2f5;
+  color: #1f2937;
+}
+
+.terminal-input {
+  @apply bg-transparent border-none outline-none w-full p-0;
+  color: #d1d5db;
+  caret-color: transparent;
+  font: inherit;
+  line-height: inherit;
+}
+
+.light .terminal-input {
+  color: #1f2937;
+}
+
+/* Terminal cursor blink */
+@keyframes terminal-blink {
+  0%, 50% { opacity: 1; }
+  51%, 100% { opacity: 0; }
+}
+
+.animate-terminal-blink {
+  animation: terminal-blink 1s step-end infinite;
 }
 
 /* Smooth scrolling */
