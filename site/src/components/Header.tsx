@@ -36,14 +36,11 @@ export function Header() {
           onClick={closeMobileMenu}
           className="flex items-center gap-3 font-semibold text-foreground transition-colors hover:text-primary"
         >
-          <div className="relative">
-            <img
-              src="https://raw.githubusercontent.com/lassejlv/termy/refs/heads/main/assets/termy_icon.png"
-              alt="Termy"
-              className="h-8 w-8 rounded-lg"
-            />
-            <div className="absolute -inset-1 rounded-lg bg-primary/20 blur-md -z-10" />
-          </div>
+          <img
+            src="https://raw.githubusercontent.com/lassejlv/termy/refs/heads/main/assets/termy_icon.png"
+            alt="Termy"
+            className="h-8 w-8 rounded-lg"
+          />
           <span className="tracking-tight">Termy</span>
         </Link>
 
