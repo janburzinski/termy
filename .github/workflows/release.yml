@@ -135,11 +135,28 @@ jobs:
       - name: Build Linux tarball
         run: ./scripts/build-linux.sh --version "$VERSION" --arch "${{ matrix.arch }}" --target "${{ matrix.target }}"
 
-      - name: Upload Linux artifact
+      - name: Install appimagetool
+        run: |
+          curl -fsSL -o /tmp/appimagetool.AppImage \
+            https://github.com/AppImage/appimagetool/releases/download/continuous/appimagetool-${{ matrix.arch }}.AppImage
+          chmod +x /tmp/appimagetool.AppImage
+          echo "APPIMAGETOOL=/tmp/appimagetool.AppImage" >> "$GITHUB_ENV"
+
+      - name: Build Linux AppImage
+        run: APPIMAGETOOL="$APPIMAGETOOL" ./scripts/build-linux.sh --version "$VERSION" --arch "${{ matrix.arch }}" --target "${{ matrix.target }}" --format appimage
+
+      - name: Upload Linux tarball artifact
         uses: actions/upload-artifact@v4
         with:
-          name: termy-linux-${{ matrix.arch }}
+          name: termy-linux-tarball-${{ matrix.arch }}
           path: target/dist/Termy-${{ env.VERSION }}-linux-${{ matrix.arch }}.tar.gz
+          if-no-files-found: error
+
+      - name: Upload Linux AppImage artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: termy-linux-appimage-${{ matrix.arch }}
+          path: target/dist/Termy-${{ env.VERSION }}-linux-${{ matrix.arch }}.AppImage
           if-no-files-found: error
 
   attach-and-finalize-release:
@@ -167,6 +184,7 @@ jobs:
             dist/*.dmg
             dist/*.exe
             dist/*.tar.gz
+            dist/*.AppImage
           fail_on_unmatched_files: true
           overwrite_files: true
 

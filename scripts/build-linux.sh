@@ -128,8 +128,16 @@ OS_NAME="linux"
 DIST_DIR="$REPO_ROOT/target/dist"
 TARGET_RELEASE_DIR="$REPO_ROOT/target/$TARGET/release"
 BINARY_PATH="$TARGET_RELEASE_DIR/$APP_NAME_LOWER"
+APPIMAGETOOL_BIN="${APPIMAGETOOL:-appimagetool}"
 
 require_cmd cargo
+if [[ "$FORMAT" == "appimage" ]]; then
+  if [[ "$APPIMAGETOOL_BIN" == */* ]]; then
+    [[ -x "$APPIMAGETOOL_BIN" ]] || die "AppImage tool not executable: $APPIMAGETOOL_BIN"
+  else
+    require_cmd "$APPIMAGETOOL_BIN"
+  fi
+fi
 
 log "Building $APP_NAME v$VERSION for $ARCH ($TARGET)"
 (cd "$REPO_ROOT" && cargo build --release --target "$TARGET")
@@ -181,7 +189,70 @@ INSTALL_SCRIPT
     ;;
 
   appimage)
-    die "AppImage format not yet implemented"
+    APPIMAGE_STAGING_ROOT="$REPO_ROOT/target/linux-appimage-staging"
+    APPDIR="$APPIMAGE_STAGING_ROOT/${APP_NAME}.AppDir"
+    APPIMAGE_NAME="${APP_NAME}-${VERSION}-${OS_NAME}-${ARCH}.AppImage"
+    OUTPUT_PATH="$DIST_DIR/$APPIMAGE_NAME"
+    DESKTOP_FILE_SOURCE="$REPO_ROOT/packaging/linux/${APP_NAME_LOWER}.desktop"
+    ICON_SOURCE="$REPO_ROOT/assets/${APP_NAME_LOWER}_icon.png"
+
+    log "Creating AppImage staging directory"
+    rm -rf "$APPIMAGE_STAGING_ROOT"
+    mkdir -p \
+      "$APPDIR/usr/bin" \
+      "$APPDIR/usr/share/applications" \
+      "$APPDIR/usr/share/icons/hicolor/512x512/apps"
+
+    cp "$BINARY_PATH" "$APPDIR/usr/bin/$APP_NAME_LOWER"
+    chmod +x "$APPDIR/usr/bin/$APP_NAME_LOWER"
+
+    # Keep assets as a sibling to the binary, matching the tarball layout.
+    if [[ -d "$REPO_ROOT/assets" ]]; then
+      mkdir -p "$APPDIR/usr/bin/assets"
+      cp -r "$REPO_ROOT/assets/"* "$APPDIR/usr/bin/assets/" 2>/dev/null || true
+    fi
+
+    if [[ -f "$DESKTOP_FILE_SOURCE" ]]; then
+      cp "$DESKTOP_FILE_SOURCE" "$APPDIR/${APP_NAME_LOWER}.desktop"
+      cp "$DESKTOP_FILE_SOURCE" "$APPDIR/usr/share/applications/${APP_NAME_LOWER}.desktop"
+    else
+      cat > "$APPDIR/${APP_NAME_LOWER}.desktop" <<EOF
+[Desktop Entry]
+Name=$APP_NAME
+Exec=$APP_NAME_LOWER
+Icon=$APP_NAME_LOWER
+Type=Application
+Categories=System;TerminalEmulator;
+EOF
+      cp "$APPDIR/${APP_NAME_LOWER}.desktop" "$APPDIR/usr/share/applications/${APP_NAME_LOWER}.desktop"
+    fi
+
+    if [[ -f "$ICON_SOURCE" ]]; then
+      cp "$ICON_SOURCE" "$APPDIR/${APP_NAME_LOWER}.png"
+      cp "$ICON_SOURCE" "$APPDIR/usr/share/icons/hicolor/512x512/apps/${APP_NAME_LOWER}.png"
+    fi
+
+    cat > "$APPDIR/AppRun" <<'APP_RUN'
+#!/usr/bin/env bash
+set -euo pipefail
+
+HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+exec "$HERE/usr/bin/termy" "$@"
+APP_RUN
+    chmod +x "$APPDIR/AppRun"
+
+    log "Creating AppImage"
+    rm -f "$OUTPUT_PATH"
+    if [[ "$APPIMAGETOOL_BIN" == *.AppImage ]]; then
+      ARCH="$ARCH" "$APPIMAGETOOL_BIN" --appimage-extract-and-run "$APPDIR" "$OUTPUT_PATH"
+    else
+      ARCH="$ARCH" "$APPIMAGETOOL_BIN" "$APPDIR" "$OUTPUT_PATH"
+    fi
+
+    [[ -f "$OUTPUT_PATH" ]] || die "AppImage was not created at $OUTPUT_PATH"
+
+    rm -rf "$APPIMAGE_STAGING_ROOT"
+    echo "Done: $OUTPUT_PATH"
     ;;
 
   *)
