@@ -2167,6 +2167,44 @@ mod tests {
         assert!(!TerminalRenderMetricsState::parse_env_flag("false"));
     }
 
+    #[cfg(debug_assertions)]
+    #[test]
+    fn terminal_pane_render_cache_clear_resets_paint_cache_state() {
+        let mut cache = TerminalPaneRenderCache {
+            cells: std::sync::Arc::new(vec![std::sync::Arc::new(vec![])]),
+            cols: 120,
+            rows: 40,
+            display_offset: 4,
+            key: Some(TerminalPaneRenderCacheKey {
+                is_active_pane: true,
+                selection_range: Some((
+                    SelectionPos { line: 1, col: 1 },
+                    SelectionPos { line: 1, col: 2 },
+                )),
+                search_results_revision: Some(7),
+                search_position: Some((1, 1)),
+                effective_background_opacity_bits: 0.92f32.to_bits(),
+                color_transform: TerminalPaneCellColorTransformKey {
+                    fg_blend_bits: 0.1f32.to_bits(),
+                    bg_blend_bits: 0.2f32.to_bits(),
+                    desaturate_bits: 0.3f32.to_bits(),
+                },
+            }),
+            paint_cache: TerminalGridPaintCacheHandle::default(),
+        };
+        cache.paint_cache.debug_seed_rows_for_tests(3);
+        assert_eq!(cache.paint_cache.debug_row_cache_len_for_tests(), 3);
+
+        cache.clear();
+
+        assert!(cache.cells.is_empty());
+        assert_eq!(cache.cols, 0);
+        assert_eq!(cache.rows, 0);
+        assert_eq!(cache.display_offset, 0);
+        assert!(cache.key.is_none());
+        assert_eq!(cache.paint_cache.debug_row_cache_len_for_tests(), 0);
+    }
+
     #[test]
     fn resolve_background_appearance_is_opaque_when_opacity_is_full() {
         let resolved = resolve_background_appearance(

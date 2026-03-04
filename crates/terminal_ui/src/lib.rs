@@ -7,6 +7,8 @@ mod render_metrics;
 mod runtime;
 mod tmux;
 
+// Intentionally re-exported for the app renderer adapter boundary. These types are the
+// cross-crate contract for row-level paint-cache invalidation between `termy` and this crate.
 pub use grid::{
     CellRenderInfo, TerminalCursorStyle, TerminalGrid, TerminalGridPaintCacheHandle,
     TerminalGridPaintDamage, TerminalGridRow, TerminalGridRows,

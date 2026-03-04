@@ -125,6 +125,17 @@ fn pane_cache_update_strategy(
     }
 }
 
+fn finalized_cache_update_strategy(
+    planned: PaneCacheUpdateStrategy,
+    did_full_rebuild: bool,
+) -> PaneCacheUpdateStrategy {
+    if planned == PaneCacheUpdateStrategy::Partial && did_full_rebuild {
+        PaneCacheUpdateStrategy::Full
+    } else {
+        planned
+    }
+}
+
 fn paint_damage_from_dirty_spans(
     spans: &[TerminalDirtySpan],
     row_count: usize,
@@ -637,7 +648,7 @@ impl TerminalView {
         #[cfg(debug_assertions)] render_pass_cache_counts: &mut RenderPassCacheStrategyCounts,
     ) -> (PaneRenderCells, PaneCacheUpdateStrategy, TerminalGridPaintDamage) {
         let damage = terminal.take_damage_snapshot();
-        let strategy = pane_cache_update_strategy(
+        let mut strategy = pane_cache_update_strategy(
             !cache.cells.is_empty(),
             cache.cols == cols && cache.rows == rows,
             cache.display_offset == display_offset,
@@ -687,11 +698,13 @@ impl TerminalView {
                     &spans,
                     context,
                 );
-                if did_full_rebuild {
+                strategy = finalized_cache_update_strategy(strategy, did_full_rebuild);
+                if strategy == PaneCacheUpdateStrategy::Full {
                     paint_damage = TerminalGridPaintDamage::Full;
+                } else {
+                    #[cfg(debug_assertions)]
+                    render_pass_cache_counts.record_partial_work(spans.len(), patched_cell_count);
                 }
-                #[cfg(debug_assertions)]
-                render_pass_cache_counts.record_partial_work(spans.len(), patched_cell_count);
             }
         }
 
@@ -2381,6 +2394,28 @@ mod tests {
             }]),
         );
         assert_eq!(strategy, PaneCacheUpdateStrategy::Full);
+    }
+
+    #[test]
+    fn finalized_cache_update_strategy_upgrades_partial_when_fallback_rebuilds() {
+        let strategy = finalized_cache_update_strategy(PaneCacheUpdateStrategy::Partial, true);
+        assert_eq!(strategy, PaneCacheUpdateStrategy::Full);
+    }
+
+    #[test]
+    fn finalized_cache_update_strategy_keeps_planned_strategy_without_fallback() {
+        assert_eq!(
+            finalized_cache_update_strategy(PaneCacheUpdateStrategy::Reuse, false),
+            PaneCacheUpdateStrategy::Reuse
+        );
+        assert_eq!(
+            finalized_cache_update_strategy(PaneCacheUpdateStrategy::Partial, false),
+            PaneCacheUpdateStrategy::Partial
+        );
+        assert_eq!(
+            finalized_cache_update_strategy(PaneCacheUpdateStrategy::Full, true),
+            PaneCacheUpdateStrategy::Full
+        );
     }
 
     #[test]

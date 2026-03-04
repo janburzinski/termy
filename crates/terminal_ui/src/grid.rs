@@ -47,6 +47,18 @@ impl TerminalGridPaintCacheHandle {
     pub fn clear(&self) {
         self.0.borrow_mut().clear();
     }
+
+    #[cfg(any(test, debug_assertions))]
+    #[doc(hidden)]
+    pub fn debug_seed_rows_for_tests(&self, row_count: usize) {
+        self.0.borrow_mut().row_ops = vec![CachedRowPaintOps::default(); row_count];
+    }
+
+    #[cfg(any(test, debug_assertions))]
+    #[doc(hidden)]
+    pub fn debug_row_cache_len_for_tests(&self) -> usize {
+        self.0.borrow().row_ops.len()
+    }
 }
 
 pub struct TerminalGrid {
@@ -819,6 +831,41 @@ impl TerminalGrid {
         ));
     }
 
+    fn rebuild_cached_rows_for_pass(
+        &self,
+        cache: &mut TerminalGridPaintCache,
+        full_repaint: bool,
+        dirty_rows: &[usize],
+        cursor_fg: Hsla,
+        highlight_fg: Hsla,
+    ) {
+        let mut rebuild_row = |row: usize| {
+            if row >= self.rows {
+                return;
+            }
+            let Some(row_slot) = cache.row_ops.get_mut(row) else {
+                return;
+            };
+            let Some(row_cells) = self.cells.get(row) else {
+                // If a row is now missing from `cells`, clear stale paint ops for this row so we
+                // don't replay previous-frame glyphs/background spans.
+                *row_slot = CachedRowPaintOps::default();
+                return;
+            };
+            *row_slot = self.rebuild_cached_row_ops(row_cells.as_slice(), cursor_fg, highlight_fg);
+        };
+
+        if full_repaint {
+            for row in 0..self.rows {
+                rebuild_row(row);
+            }
+        } else {
+            for row in dirty_rows.iter().copied() {
+                rebuild_row(row);
+            }
+        }
+    }
+
     fn paint_with_row_cache(&self, bounds: Bounds<Pixels>, window: &mut Window, cx: &mut App) {
         let origin = bounds.origin;
         let terminal_font_features = FontFeatures::disable_ligatures();
@@ -850,26 +897,13 @@ impl TerminalGrid {
         let mut cache = self.paint_cache.0.borrow_mut();
         cache.ensure_row_capacity(self.rows);
         let (full_repaint, dirty_rows) = self.dirty_rows_for_pass(&mut cache);
-        if full_repaint {
-            for row in 0..self.rows {
-                let Some(row_cells) = self.cells.get(row) else {
-                    continue;
-                };
-                cache.row_ops[row] =
-                    self.rebuild_cached_row_ops(row_cells.as_slice(), cursor_fg, highlight_fg);
-            }
-        } else {
-            for row in dirty_rows.iter().copied() {
-                if row >= self.rows {
-                    continue;
-                }
-                let Some(row_cells) = self.cells.get(row) else {
-                    continue;
-                };
-                cache.row_ops[row] =
-                    self.rebuild_cached_row_ops(row_cells.as_slice(), cursor_fg, highlight_fg);
-            }
-        }
+        self.rebuild_cached_rows_for_pass(
+            &mut cache,
+            full_repaint,
+            dirty_rows.as_ref(),
+            cursor_fg,
+            highlight_fg,
+        );
 
         // GPUI paint passes do not preserve previous pixels across frames. Always clear and draw
         // all rows; damage only controls which cached row ops are recomputed.
@@ -1399,5 +1433,48 @@ mod tests {
         assert_eq!(spans[1].start_col, 2);
         assert_eq!(spans[1].end_col_exclusive, 4);
         assert_eq!(spans[1].color, grid.search_match_bg);
+    }
+
+    #[test]
+    fn rebuild_cached_rows_for_pass_clears_rows_missing_from_cells() {
+        let mut grid = test_grid(vec![test_cell(0, 0, 'a')], None);
+        grid.rows = 2;
+        grid.cells = Arc::new(vec![Arc::new(vec![test_cell(0, 0, 'a')])]);
+
+        let cursor_fg = Hsla {
+            h: 0.0,
+            s: 0.0,
+            l: 0.0,
+            a: 1.0,
+        };
+        let highlight_fg = Hsla {
+            h: 0.0,
+            s: 0.0,
+            l: 0.08,
+            a: 1.0,
+        };
+
+        let stale_row_cells = vec![test_cell(0, 1, 'z')];
+        let mut cache = TerminalGridPaintCache {
+            row_ops: vec![
+                CachedRowPaintOps::default(),
+                grid.rebuild_cached_row_ops(stale_row_cells.as_slice(), cursor_fg, highlight_fg),
+            ],
+            ..Default::default()
+        };
+        assert!(!cache.row_ops[1].draw_ops.is_empty());
+
+        grid.rebuild_cached_rows_for_pass(&mut cache, false, &[1usize], cursor_fg, highlight_fg);
+        assert!(cache.row_ops[1].draw_ops.is_empty());
+        assert!(cache.row_ops[1].background_spans.is_empty());
+    }
+
+    #[test]
+    fn paint_cache_handle_clear_resets_seeded_rows() {
+        let handle = TerminalGridPaintCacheHandle::default();
+        handle.debug_seed_rows_for_tests(3);
+        assert_eq!(handle.debug_row_cache_len_for_tests(), 3);
+        handle.clear();
+        assert_eq!(handle.debug_row_cache_len_for_tests(), 0);
     }
 }
