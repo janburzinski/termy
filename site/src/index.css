@@ -36,49 +36,49 @@
   --color-ring: var(--ring);
 }
 
-/* Original Termy dark theme */
+/* Dark theme — clean minimal */
 :root {
   --radius: 0.75rem;
-  --background: #090d1a;
-  --foreground: #e7ebf5;
-  --card: #161d34;
-  --card-foreground: #dbe4f6;
-  --popover: #161d34;
-  --popover-foreground: #dbe4f6;
-  --primary: #a7e9a3;
-  --primary-foreground: #0b1020;
-  --secondary: #202948;
-  --secondary-foreground: #dbe4f6;
-  --muted: #1a2340;
-  --muted-foreground: #9eabc7;
-  --accent: #8cbef2;
-  --accent-foreground: #0b1020;
-  --destructive: #f1b8c5;
-  --border: #30385a;
-  --input: #30385a;
-  --ring: #69b4f2;
+  --background: #0a0a0a;
+  --foreground: #fafafa;
+  --card: #111111;
+  --card-foreground: #fafafa;
+  --popover: #111111;
+  --popover-foreground: #fafafa;
+  --primary: #22c55e;
+  --primary-foreground: #052e16;
+  --secondary: #171717;
+  --secondary-foreground: #fafafa;
+  --muted: #171717;
+  --muted-foreground: #737373;
+  --accent: #171717;
+  --accent-foreground: #fafafa;
+  --destructive: #ef4444;
+  --border: #1a1a1a;
+  --input: #1a1a1a;
+  --ring: #22c55e;
 }
 
-/* Original Termy light theme */
+/* Light theme — clean minimal */
 .light {
-  --background: #f9fbff;
-  --foreground: #1f2d46;
-  --card: rgba(255, 255, 255, 0.9);
-  --card-foreground: #223452;
-  --popover: rgba(255, 255, 255, 0.95);
-  --popover-foreground: #223452;
-  --primary: #97dda6;
-  --primary-foreground: #10243a;
-  --secondary: #e2e9f8;
-  --secondary-foreground: #223452;
-  --muted: #edf2fc;
-  --muted-foreground: #5a6b8a;
-  --accent: #69b4f2;
-  --accent-foreground: #10243a;
-  --destructive: #d85050;
-  --border: #c8d4ea;
-  --input: #c8d4ea;
-  --ring: #9db2d6;
+  --background: #fafafa;
+  --foreground: #0a0a0a;
+  --card: #ffffff;
+  --card-foreground: #0a0a0a;
+  --popover: #ffffff;
+  --popover-foreground: #0a0a0a;
+  --primary: #16a34a;
+  --primary-foreground: #f0fdf4;
+  --secondary: #f5f5f5;
+  --secondary-foreground: #0a0a0a;
+  --muted: #f5f5f5;
+  --muted-foreground: #525252;
+  --accent: #f5f5f5;
+  --accent-foreground: #0a0a0a;
+  --destructive: #dc2626;
+  --border: #e5e5e5;
+  --input: #e5e5e5;
+  --ring: #16a34a;
 }
 
 @layer base {
@@ -92,147 +92,51 @@
   }
 }
 
-/* Gradient text - using original accent colors */
+/* Gradient text — green only */
 .gradient-text {
   @apply bg-clip-text text-transparent;
-  background-image: linear-gradient(135deg, #a7e9a3 0%, #8cbef2 100%);
+  background-image: linear-gradient(135deg, #4ade80 0%, #86efac 100%);
 }
 
 .light .gradient-text {
-  background-image: linear-gradient(135deg, #97dda6 0%, #69b4f2 100%);
+  background-image: linear-gradient(135deg, #16a34a 0%, #22c55e 100%);
 }
 
-/* Glow effects - using original primary */
-.glow-sm {
-  box-shadow: 0 0 30px -10px rgba(167, 233, 163, 0.5);
-}
-
-.glow {
-  box-shadow: 0 0 80px -20px rgba(167, 233, 163, 0.4);
-}
-
-.light .glow-sm {
-  box-shadow: 0 0 30px -10px rgba(151, 221, 166, 0.4);
-}
-
-.light .glow {
-  box-shadow: 0 0 80px -20px rgba(151, 221, 166, 0.3);
-}
-
-/* Grid background */
-.grid-bg {
-  background-size: 80px 80px;
-  background-image:
-    linear-gradient(to right, rgba(140, 190, 242, 0.03) 1px, transparent 1px),
-    linear-gradient(to bottom, rgba(140, 190, 242, 0.03) 1px, transparent 1px);
-}
-
-.light .grid-bg {
-  background-image:
-    linear-gradient(to right, rgba(105, 180, 242, 0.06) 1px, transparent 1px),
-    linear-gradient(to bottom, rgba(105, 180, 242, 0.06) 1px, transparent 1px);
-}
-
-/* Radial fade - original gradient style */
-.radial-fade {
-  background:
-    radial-gradient(ellipse 80% 50% at 50% -10%, rgba(102, 130, 198, 0.2), transparent),
-    radial-gradient(ellipse 60% 40% at 80% 10%, rgba(77, 174, 247, 0.12), transparent),
-    radial-gradient(ellipse 50% 30% at 20% 20%, rgba(167, 233, 163, 0.08), transparent);
-}
-
-.light .radial-fade {
-  background:
-    radial-gradient(ellipse 80% 50% at 50% -10%, rgba(105, 180, 242, 0.15), transparent),
-    radial-gradient(ellipse 60% 40% at 80% 10%, rgba(151, 221, 166, 0.1), transparent);
-}
-
-/* Animations */
-@keyframes float {
-  0%, 100% { transform: translateY(0); }
-  50% { transform: translateY(-10px); }
-}
-
-@keyframes shimmer {
-  0% { background-position: -200% 0; }
-  100% { background-position: 200% 0; }
-}
-
-@keyframes fade-up {
+/* Blur fade-in animation */
+@keyframes blur-fade-in {
   from {
     opacity: 0;
-    transform: translateY(20px);
+    filter: blur(8px);
+    transform: translateY(10px);
   }
   to {
     opacity: 1;
+    filter: blur(0);
     transform: translateY(0);
   }
 }
 
-.animate-float {
-  animation: float 6s ease-in-out infinite;
+.animate-blur-in {
+  animation: blur-fade-in 0.4s ease-out forwards;
+  opacity: 0;
 }
 
-.animate-shimmer {
-  animation: shimmer 8s linear infinite;
-  background-size: 200% 100%;
-}
-
-.animate-fade-up {
-  animation: fade-up 0.6s ease-out forwards;
-}
-
-/* Terminal window styling */
+/* Terminal window styling — minimal */
 .terminal-window {
-  @apply rounded-2xl border border-border/50 bg-card overflow-hidden;
-  box-shadow:
-    0 0 0 1px rgba(255, 255, 255, 0.03),
-    0 30px 60px -15px rgba(0, 0, 0, 0.5),
-    0 0 100px -30px rgba(140, 190, 242, 0.15);
+  @apply rounded-2xl border border-border bg-card overflow-hidden;
+  box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.4);
 }
 
 .light .terminal-window {
-  box-shadow:
-    0 0 0 1px rgba(0, 0, 0, 0.03),
-    0 30px 60px -15px rgba(0, 0, 0, 0.1),
-    0 0 100px -30px rgba(105, 180, 242, 0.1);
+  box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.1);
 }
 
 .terminal-header {
-  @apply flex items-center gap-2 px-4 py-3 bg-secondary/30 border-b border-border/50;
+  @apply flex items-center gap-2 px-4 py-3 border-b border-border;
 }
 
 .terminal-dot {
   @apply w-3 h-3 rounded-full;
-}
-
-/* Card hover effect */
-.card-hover {
-  @apply transition-all duration-300;
-}
-
-.card-hover:hover {
-  @apply border-accent/50;
-  box-shadow: 0 0 40px -15px rgba(140, 190, 242, 0.3);
-  transform: translateY(-2px);
-}
-
-.light .card-hover:hover {
-  box-shadow: 0 0 40px -15px rgba(105, 180, 242, 0.25);
-}
-
-/* Badge styles */
-.badge-glow {
-  @apply relative;
-}
-
-.badge-glow::before {
-  content: "";
-  @apply absolute inset-0 rounded-full;
-  background: inherit;
-  filter: blur(8px);
-  opacity: 0.5;
-  z-index: -1;
 }
 
 /* Smooth scrolling */
