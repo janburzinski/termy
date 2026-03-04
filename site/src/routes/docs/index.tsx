@@ -1,32 +1,20 @@
-import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
+import { createFileRoute, Link } from "@tanstack/react-router";
 import { getDocsByCategory, sortDocCategories } from "@/lib/docs";
+import { Button } from "@/components/ui/button";
+import { ChevronLeft } from "lucide-react";
 import { Sidebar } from "@/components/docs/Sidebar";
-import { useCallback } from "react";
-
-type SearchParams = { q?: string };
+import { validateSearch, useDocSearchChange } from "@/hooks/useDocSearch";
 
 export const Route = createFileRoute("/docs/")({
   component: DocsPage,
-  validateSearch: (search: Record<string, unknown>): SearchParams => ({
-    q: typeof search.q === "string" ? search.q : undefined,
-  }),
+  validateSearch,
 });
 
 function DocsPage() {
   const { q: search = "" } = Route.useSearch();
-  const navigate = useNavigate({ from: Route.fullPath });
   const docsByCategory = getDocsByCategory();
   const categories = sortDocCategories(Object.keys(docsByCategory));
-
-  const handleSearchChange = useCallback(
-    (value: string) => {
-      navigate({
-        search: value ? { q: value } : {},
-        replace: true,
-      });
-    },
-    [navigate],
-  );
+  const handleSearchChange = useDocSearchChange(Route.fullPath);
 
   return (
     <section className="pt-24 pb-20">
@@ -41,25 +29,12 @@ function DocsPage() {
         {/* Main content */}
         <main className="flex-1 min-w-0">
           {/* Mobile back link */}
-          <Link
-            to="/"
-            className="lg:hidden text-sm text-muted-foreground hover:text-foreground transition-colors inline-flex items-center gap-1 mb-6"
-          >
-            <svg
-              className="w-4 h-4"
-              fill="none"
-              viewBox="0 0 24 24"
-              stroke="currentColor"
-            >
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                strokeWidth={2}
-                d="M15 19l-7-7 7-7"
-              />
-            </svg>
-            Back to home
-          </Link>
+          <Button asChild variant="ghost" size="sm" className="lg:hidden mb-6 text-muted-foreground hover:text-foreground">
+            <Link to="/">
+              <ChevronLeft className="w-4 h-4" />
+              Back to home
+            </Link>
+          </Button>
 
           <div className="mb-8">
             <h1 className="text-3xl md:text-4xl font-bold">Documentation</h1>

@@ -1,3 +1,5 @@
+import { generateSlug } from "@/lib/utils";
+
 // Docs SDK for loading markdown content from src/content/
 
 export interface DocMeta {
@@ -153,10 +155,7 @@ export function extractHeadings(content: string): Heading[] {
   while ((match = headingRegex.exec(content)) !== null) {
     const level = match[1].length;
     const text = match[2].trim();
-    const id = text
-      .toLowerCase()
-      .replace(/[^a-z0-9]+/g, "-")
-      .replace(/(^-|-$)/g, "");
+    const id = generateSlug(text);
 
     headings.push({ id, text, level });
   }

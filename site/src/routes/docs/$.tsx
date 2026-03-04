@@ -2,22 +2,21 @@ import {
   createFileRoute,
   Link,
   notFound,
-  useNavigate,
 } from "@tanstack/react-router";
 import { getDocBySlug, getAllDocs, extractHeadings } from "@/lib/docs";
+import { proseClasses, generateSlug } from "@/lib/utils";
+import { Button } from "@/components/ui/button";
+import { ChevronLeft, ChevronRight } from "lucide-react";
 import { Sidebar } from "@/components/docs/Sidebar";
 import { TableOfContents } from "@/components/docs/TableOfContents";
+import { validateSearch, useDocSearchChange } from "@/hooks/useDocSearch";
 import Markdown from "react-markdown";
 import type { Components } from "react-markdown";
-import { useMemo, useCallback, type ReactNode } from "react";
-
-type SearchParams = { q?: string };
+import { useMemo, type ReactNode } from "react";
 
 export const Route = createFileRoute("/docs/$")({
   component: DocPage,
-  validateSearch: (search: Record<string, unknown>): SearchParams => ({
-    q: typeof search.q === "string" ? search.q : undefined,
-  }),
+  validateSearch,
   loader: ({ params }) => {
     const slug = params._splat ?? "";
     const doc = getDocBySlug(slug);
@@ -27,14 +26,6 @@ export const Route = createFileRoute("/docs/$")({
     return doc;
   },
 });
-
-// Generate heading ID from text
-function generateId(text: string): string {
-  return text
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/(^-|-$)/g, "");
-}
 
 // Highlight matching text
 function highlightText(text: string, query: string): ReactNode {
@@ -84,7 +75,7 @@ function createMarkdownComponents(query: string): Components {
   return {
     h2: ({ children }) => {
       const text = String(children);
-      const id = generateId(text);
+      const id = generateSlug(text);
       return (
         <h2 id={id} className="scroll-mt-24">
           {wrapChildren(children)}
@@ -93,7 +84,7 @@ function createMarkdownComponents(query: string): Components {
     },
     h3: ({ children }) => {
       const text = String(children);
-      const id = generateId(text);
+      const id = generateSlug(text);
       return (
         <h3 id={id} className="scroll-mt-24">
           {wrapChildren(children)}
@@ -102,7 +93,7 @@ function createMarkdownComponents(query: string): Components {
     },
     h4: ({ children }) => {
       const text = String(children);
-      const id = generateId(text);
+      const id = generateSlug(text);
       return (
         <h4 id={id} className="scroll-mt-24">
           {wrapChildren(children)}
@@ -119,23 +110,13 @@ function createMarkdownComponents(query: string): Components {
 function DocPage() {
   const doc = Route.useLoaderData();
   const { q: search = "" } = Route.useSearch();
-  const navigate = useNavigate({ from: Route.fullPath });
   const allDocs = getAllDocs();
   const currentIndex = allDocs.findIndex((d) => d.slug === doc.slug);
   const prevDoc = currentIndex > 0 ? allDocs[currentIndex - 1] : null;
   const nextDoc =
     currentIndex < allDocs.length - 1 ? allDocs[currentIndex + 1] : null;
   const headings = extractHeadings(doc.content);
-
-  const handleSearchChange = useCallback(
-    (value: string) => {
-      navigate({
-        search: value ? { q: value } : {},
-        replace: true,
-      });
-    },
-    [navigate],
-  );
+  const handleSearchChange = useDocSearchChange(Route.fullPath);
 
   const markdownComponents = useMemo(
     () => createMarkdownComponents(search),
@@ -155,25 +136,12 @@ function DocPage() {
         {/* Main content */}
         <main className="flex-1 min-w-0">
           {/* Mobile back link */}
-          <Link
-            to="/docs"
-            className="lg:hidden text-sm text-muted-foreground hover:text-foreground transition-colors inline-flex items-center gap-1 mb-6"
-          >
-            <svg
-              className="w-4 h-4"
-              fill="none"
-              viewBox="0 0 24 24"
-              stroke="currentColor"
-            >
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                strokeWidth={2}
-                d="M15 19l-7-7 7-7"
-              />
-            </svg>
-            All docs
-          </Link>
+          <Button asChild variant="ghost" size="sm" className="lg:hidden mb-6 text-muted-foreground hover:text-foreground">
+            <Link to="/docs">
+              <ChevronLeft className="w-4 h-4" />
+              All docs
+            </Link>
+          </Button>
 
           {/* Search indicator */}
           {search && (
@@ -199,7 +167,7 @@ function DocPage() {
           </div>
 
           {/* Content */}
-          <div className="prose prose-sm prose-invert max-w-none prose-headings:text-foreground prose-p:text-muted-foreground prose-strong:text-foreground prose-a:text-primary prose-a:no-underline hover:prose-a:underline prose-code:text-primary prose-code:bg-secondary prose-code:px-1.5 prose-code:py-0.5 prose-code:rounded prose-code:before:content-none prose-code:after:content-none prose-pre:bg-background prose-pre:border prose-pre:border-border/50 prose-ul:text-muted-foreground prose-li:marker:text-muted-foreground prose-li:text-muted-foreground">
+          <div className={`${proseClasses} prose-li:text-muted-foreground`}>
             <Markdown components={markdownComponents}>{doc.content}</Markdown>
           </div>
 
@@ -213,19 +181,7 @@ function DocPage() {
               >
                 <span className="text-xs text-muted-foreground">Previous</span>
                 <div className="flex items-center gap-2 mt-1">
-                  <svg
-                    className="w-4 h-4 text-muted-foreground group-hover:text-primary transition-colors"
-                    fill="none"
-                    viewBox="0 0 24 24"
-                    stroke="currentColor"
-                  >
-                    <path
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      strokeWidth={2}
-                      d="M15 19l-7-7 7-7"
-                    />
-                  </svg>
+                  <ChevronLeft className="w-4 h-4 text-muted-foreground group-hover:text-primary transition-colors" />
                   <span className="font-medium text-foreground group-hover:text-primary transition-colors">
                     {prevDoc.title}
                   </span>
@@ -246,19 +202,7 @@ function DocPage() {
                   <span className="font-medium text-foreground group-hover:text-primary transition-colors">
                     {nextDoc.title}
                   </span>
-                  <svg
-                    className="w-4 h-4 text-muted-foreground group-hover:text-primary transition-colors"
-                    fill="none"
-                    viewBox="0 0 24 24"
-                    stroke="currentColor"
-                  >
-                    <path
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      strokeWidth={2}
-                      d="M9 5l7 7-7 7"
-                    />
-                  </svg>
+                  <ChevronRight className="w-4 h-4 text-muted-foreground group-hover:text-primary transition-colors" />
                 </div>
               </Link>
             ) : (
