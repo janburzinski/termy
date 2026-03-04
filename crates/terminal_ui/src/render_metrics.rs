@@ -1,14 +1,14 @@
-#[cfg(debug_assertions)]
+#[cfg(any(debug_assertions, test))]
 use std::sync::atomic::{AtomicU64, Ordering};
 
-#[cfg(debug_assertions)]
+#[cfg(any(debug_assertions, test))]
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct TerminalUiRenderMetricsSnapshot {
     pub grid_paint_count: u64,
     pub shape_line_calls: u64,
 }
 
-#[cfg(debug_assertions)]
+#[cfg(any(debug_assertions, test))]
 impl TerminalUiRenderMetricsSnapshot {
     pub fn saturating_sub(self, previous: Self) -> Self {
         Self {
@@ -18,35 +18,36 @@ impl TerminalUiRenderMetricsSnapshot {
     }
 }
 
-#[cfg(debug_assertions)]
+// Keep render metrics active in tests, including `cargo test --release`.
+#[cfg(any(debug_assertions, test))]
 static GRID_PAINT_COUNT: AtomicU64 = AtomicU64::new(0);
-#[cfg(debug_assertions)]
+#[cfg(any(debug_assertions, test))]
 static SHAPE_LINE_CALLS: AtomicU64 = AtomicU64::new(0);
 
-#[cfg(debug_assertions)]
+#[cfg(any(debug_assertions, test))]
 fn increment_counter(counter: &AtomicU64) {
     let _ = counter.fetch_update(Ordering::Relaxed, Ordering::Relaxed, |current| {
         Some(current.saturating_add(1))
     });
 }
 
-#[cfg(debug_assertions)]
+#[cfg(any(debug_assertions, test))]
 pub(crate) fn increment_grid_paint_count() {
     increment_counter(&GRID_PAINT_COUNT);
 }
 
-#[cfg(not(debug_assertions))]
+#[cfg(not(any(debug_assertions, test)))]
 pub(crate) fn increment_grid_paint_count() {}
 
-#[cfg(debug_assertions)]
+#[cfg(any(debug_assertions, test))]
 pub(crate) fn increment_shape_line_calls() {
     increment_counter(&SHAPE_LINE_CALLS);
 }
 
-#[cfg(not(debug_assertions))]
+#[cfg(not(any(debug_assertions, test)))]
 pub(crate) fn increment_shape_line_calls() {}
 
-#[cfg(debug_assertions)]
+#[cfg(any(debug_assertions, test))]
 pub fn terminal_ui_render_metrics_snapshot() -> TerminalUiRenderMetricsSnapshot {
     TerminalUiRenderMetricsSnapshot {
         grid_paint_count: GRID_PAINT_COUNT.load(Ordering::Relaxed),
@@ -54,7 +55,7 @@ pub fn terminal_ui_render_metrics_snapshot() -> TerminalUiRenderMetricsSnapshot 
     }
 }
 
-#[cfg(debug_assertions)]
+#[cfg(any(debug_assertions, test))]
 pub fn terminal_ui_render_metrics_reset() {
     GRID_PAINT_COUNT.store(0, Ordering::Relaxed);
     SHAPE_LINE_CALLS.store(0, Ordering::Relaxed);
