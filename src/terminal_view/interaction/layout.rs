@@ -1,6 +1,20 @@
 use super::*;
 
 impl TerminalView {
+    fn compute_terminal_cols(terminal_width: f32, cell_width: f32, edge_to_edge_grid: bool) -> u16 {
+        let cols = if edge_to_edge_grid {
+            (terminal_width / cell_width).ceil()
+        } else {
+            (terminal_width / cell_width).floor()
+        };
+        cols.max(2.0) as u16
+    }
+
+    fn compute_terminal_rows(terminal_height: f32, cell_height: f32) -> u16 {
+        // Always floor rows to avoid over-allocation that clips bottom status/help lines in TUIs.
+        (terminal_height / cell_height).floor().max(1.0) as u16
+    }
+
     fn scale_native_pane_edge(edge: u16, old_extent: u16, new_extent: u16) -> u16 {
         if old_extent <= 1 || new_extent == 0 {
             return 0;
@@ -213,18 +227,8 @@ impl TerminalView {
             && self
                 .active_terminal()
                 .is_some_and(|terminal| terminal.alternate_screen_mode());
-        let cols = if edge_to_edge_grid {
-            (terminal_width / cell_width).ceil()
-        } else {
-            (terminal_width / cell_width).floor()
-        }
-        .max(2.0) as u16;
-        let rows = if edge_to_edge_grid {
-            (terminal_height / cell_height).ceil()
-        } else {
-            (terminal_height / cell_height).floor()
-        }
-        .max(1.0) as u16;
+        let cols = Self::compute_terminal_cols(terminal_width, cell_width, edge_to_edge_grid);
+        let rows = Self::compute_terminal_rows(terminal_height, cell_height);
 
         match backend_mode {
             RuntimeKind::Tmux => {
@@ -337,5 +341,22 @@ mod tests {
             TerminalView::window_y_to_terminal_content_y(20.0, 40.0),
             -20.0
         );
+    }
+
+    #[test]
+    fn compute_terminal_rows_floors_fractional_row_count() {
+        assert_eq!(TerminalView::compute_terminal_rows(24.1, 12.0), 2);
+        assert_eq!(TerminalView::compute_terminal_rows(23.9, 12.0), 1);
+    }
+
+    #[test]
+    fn compute_terminal_rows_enforces_minimum_one_row() {
+        assert_eq!(TerminalView::compute_terminal_rows(0.5, 12.0), 1);
+    }
+
+    #[test]
+    fn compute_terminal_cols_preserves_edge_to_edge_ceil_behavior() {
+        assert_eq!(TerminalView::compute_terminal_cols(30.1, 10.0, true), 4);
+        assert_eq!(TerminalView::compute_terminal_cols(30.1, 10.0, false), 3);
     }
 }
