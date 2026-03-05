@@ -9,12 +9,18 @@
 // Additionally, you should also exclude this file from your linter and/or formatter to prevent it from being checked or modified.
 
 import { Route as rootRouteImport } from "./routes/__root"
+import { Route as ThemesRouteImport } from "./routes/themes"
 import { Route as IndexRouteImport } from "./routes/index"
 import { Route as ReleasesIndexRouteImport } from "./routes/releases/index"
 import { Route as DocsIndexRouteImport } from "./routes/docs/index"
 import { Route as ReleasesTagRouteImport } from "./routes/releases/$tag"
 import { Route as DocsSplatRouteImport } from "./routes/docs/$"
 
+const ThemesRoute = ThemesRouteImport.update({
+  id: "/themes",
+  path: "/themes",
+  getParentRoute: () => rootRouteImport,
+} as any)
 const IndexRoute = IndexRouteImport.update({
   id: "/",
   path: "/",
@@ -43,6 +49,7 @@ const DocsSplatRoute = DocsSplatRouteImport.update({
 
 export interface FileRoutesByFullPath {
   "/": typeof IndexRoute
+  "/themes": typeof ThemesRoute
   "/docs/$": typeof DocsSplatRoute
   "/releases/$tag": typeof ReleasesTagRoute
   "/docs/": typeof DocsIndexRoute
@@ -50,6 +57,7 @@ export interface FileRoutesByFullPath {
 }
 export interface FileRoutesByTo {
   "/": typeof IndexRoute
+  "/themes": typeof ThemesRoute
   "/docs/$": typeof DocsSplatRoute
   "/releases/$tag": typeof ReleasesTagRoute
   "/docs": typeof DocsIndexRoute
@@ -58,6 +66,7 @@ export interface FileRoutesByTo {
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   "/": typeof IndexRoute
+  "/themes": typeof ThemesRoute
   "/docs/$": typeof DocsSplatRoute
   "/releases/$tag": typeof ReleasesTagRoute
   "/docs/": typeof DocsIndexRoute
@@ -65,14 +74,28 @@ export interface FileRoutesById {
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: "/" | "/docs/$" | "/releases/$tag" | "/docs/" | "/releases/"
+  fullPaths:
+    | "/"
+    | "/themes"
+    | "/docs/$"
+    | "/releases/$tag"
+    | "/docs/"
+    | "/releases/"
   fileRoutesByTo: FileRoutesByTo
-  to: "/" | "/docs/$" | "/releases/$tag" | "/docs" | "/releases"
-  id: "__root__" | "/" | "/docs/$" | "/releases/$tag" | "/docs/" | "/releases/"
+  to: "/" | "/themes" | "/docs/$" | "/releases/$tag" | "/docs" | "/releases"
+  id:
+    | "__root__"
+    | "/"
+    | "/themes"
+    | "/docs/$"
+    | "/releases/$tag"
+    | "/docs/"
+    | "/releases/"
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
+  ThemesRoute: typeof ThemesRoute
   DocsSplatRoute: typeof DocsSplatRoute
   ReleasesTagRoute: typeof ReleasesTagRoute
   DocsIndexRoute: typeof DocsIndexRoute
@@ -81,6 +104,13 @@ export interface RootRouteChildren {
 
 declare module "@tanstack/react-router" {
   interface FileRoutesByPath {
+    "/themes": {
+      id: "/themes"
+      path: "/themes"
+      fullPath: "/themes"
+      preLoaderRoute: typeof ThemesRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     "/": {
       id: "/"
       path: "/"
@@ -121,6 +151,7 @@ declare module "@tanstack/react-router" {
 
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
+  ThemesRoute: ThemesRoute,
   DocsSplatRoute: DocsSplatRoute,
   ReleasesTagRoute: ReleasesTagRoute,
   DocsIndexRoute: DocsIndexRoute,
