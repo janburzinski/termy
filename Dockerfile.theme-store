@@ -28,7 +28,7 @@ RUN apt-get update \
 
 WORKDIR /app
 
-COPY --from=builder /app/target/release/termy_theme_store /usr/local/bin/termy_theme_store
+COPY --from=builder /app/crates/theme-store/target/release/termy_theme_store /usr/local/bin/termy_theme_store
 
 ENV THEME_STORE_BIND=0.0.0.0:8080
 
