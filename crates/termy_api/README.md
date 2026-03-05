@@ -1,11 +1,11 @@
-# termy_theme_store
+# termy_api
 
 Theme store API for Termy, backed by PostgreSQL via SQLx.
 
 ## Run
 
 ```bash
-export DATABASE_URL=postgres://postgres:postgres@localhost:5432/termy_theme_store
+export DATABASE_URL=postgres://postgres:postgres@localhost:5432/termy_api
 export THEME_STORE_BIND=127.0.0.1:8080
 export GITHUB_CLIENT_ID=...
 export GITHUB_CLIENT_SECRET=...
@@ -14,7 +14,7 @@ export S3_BUCKET=termy-themes
 export S3_REGION=eu-central-1
 # optional for MinIO/localstack:
 # export S3_ENDPOINT=http://127.0.0.1:9000
-cargo run -p termy_theme_store
+cargo run -p termy_api
 ```
 
 Migrations run automatically on startup.

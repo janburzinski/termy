@@ -7298,6 +7298,33 @@ dependencies = [
 ]
 
 [[package]]
+name = "termy_api"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "aws-config",
+ "aws-sdk-s3",
+ "aws-types",
+ "axum",
+ "chrono",
+ "dotenvy",
+ "hex",
+ "jsonschema",
+ "reqwest",
+ "semver",
+ "serde",
+ "serde_json",
+ "sha2",
+ "sqlx",
+ "thiserror 2.0.18",
+ "tokio",
+ "tracing",
+ "tracing-subscriber",
+ "url",
+ "uuid",
+]
+
+[[package]]
 name = "termy_auto_update"
 version = "0.1.0"
 dependencies = [
@@ -7418,33 +7445,6 @@ dependencies = [
 [[package]]
 name = "termy_theme_core"
 version = "0.1.0"
-
-[[package]]
-name = "termy_theme_store"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "aws-config",
- "aws-sdk-s3",
- "aws-types",
- "axum",
- "chrono",
- "dotenvy",
- "hex",
- "jsonschema",
- "reqwest",
- "semver",
- "serde",
- "serde_json",
- "sha2",
- "sqlx",
- "thiserror 2.0.18",
- "tokio",
- "tracing",
- "tracing-subscriber",
- "url",
- "uuid",
-]
 
 [[package]]
 name = "termy_themes"

@@ -60,7 +60,7 @@ async fn main() -> anyhow::Result<()> {
     let _ = dotenvy::dotenv();
 
     let database_url = env::var("DATABASE_URL")
-        .map_err(|_| anyhow::anyhow!("DATABASE_URL must be set for termy_theme_store"))?;
+        .map_err(|_| anyhow::anyhow!("DATABASE_URL must be set for termy_api"))?;
     let bind_addr = env::var("THEME_STORE_BIND").unwrap_or_else(|_| "127.0.0.1:8080".to_string());
 
     let auth = AuthConfig {
@@ -192,7 +192,7 @@ fn init_tracing() {
     tracing_subscriber::fmt()
         .with_env_filter(
             tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| "termy_theme_store=info".into()),
+                .unwrap_or_else(|_| "termy_api=info".into()),
         )
         .compact()
         .init();
@@ -396,7 +396,7 @@ async fn auth_github_callback(
         .http_client
         .get("https://api.github.com/user")
         .header(header::ACCEPT, "application/vnd.github+json")
-        .header(header::USER_AGENT, "termy-theme-store")
+        .header(header::USER_AGENT, "termy-api")
         .bearer_auth(&token_payload.access_token)
         .send()
         .await

@@ -17,7 +17,7 @@ members = [
   "crates/cli",
   "crates/openai",
   "crates/gemini",
-  "crates/theme-store",
+  "crates/termy_api",
 ]
 resolver = "2"
 
