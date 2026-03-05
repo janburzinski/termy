@@ -2,15 +2,10 @@ FROM rust:bookworm AS builder
 
 WORKDIR /app
 
-COPY Cargo.toml Cargo.lock ./
+COPY Cargo.lock Cargo.lock
 COPY crates/theme-store/Cargo.toml crates/theme-store/Cargo.toml
-
-RUN mkdir -p crates/theme-store/src \
-    && echo "fn main() {}" > crates/theme-store/src/main.rs \
-    && cargo build --release -p termy_theme_store \
-    && rm -rf crates/theme-store/src
-
-COPY crates/theme-store crates/theme-store
+COPY crates/theme-store/src crates/theme-store/src
+COPY crates/theme-store/migrations crates/theme-store/migrations
 COPY theme.schema.json theme.schema.json
 
 ARG DATABASE_URL
@@ -23,8 +18,7 @@ ARG S3_ENDPOINT
 ARG AWS_ACCESS_KEY_ID
 ARG AWS_SECRET_ACCESS_KEY
 
-
-RUN cargo build --release -p termy_theme_store
+RUN cargo build --manifest-path crates/theme-store/Cargo.toml --release
 
 FROM debian:bookworm-slim
 
