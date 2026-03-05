@@ -10,6 +10,10 @@ export THEME_STORE_BIND=127.0.0.1:8080
 export GITHUB_CLIENT_ID=...
 export GITHUB_CLIENT_SECRET=...
 export GITHUB_REDIRECT_URI=http://127.0.0.1:8080/auth/github/callback
+export S3_BUCKET=termy-themes
+export S3_REGION=eu-central-1
+# optional for MinIO/localstack:
+# export S3_ENDPOINT=http://127.0.0.1:9000
 cargo run -p termy_theme_store
 ```
 
@@ -41,23 +45,20 @@ Create theme:
 
 ```bash
 curl -X POST http://127.0.0.1:8080/themes \
-  -H 'Content-Type: application/json' \
-  -d '{
-    "name": "Tokyo Night",
-    "slug": "tokyo-night",
-    "description": "Dark blue terminal palette"
-  }'
+  -F 'name=Tokyo Night' \
+  -F 'slug=tokyo-night' \
+  -F 'description=Dark blue terminal palette' \
+  -F 'version=1.0.0' \
+  -F 'isPublic=true' \
+  -F 'themeFile=@./tokyo-night.json;type=application/json'
 ```
 
 Publish version:
 
 ```bash
 curl -X POST http://127.0.0.1:8080/themes/tokyo-night/versions \
-  -H 'Content-Type: application/json' \
-  -d '{
-    "version": "1.0.0",
-    "fileKey": "themes/tokyo-night/1.0.0/theme.json",
-    "changelog": "Initial release",
-    "checksumSha256": "..."
-  }'
+  -F 'version=1.1.0' \
+  -F 'changelog=Update blue tones' \
+  -F 'checksumSha256=...' \
+  -F 'themeFile=@./tokyo-night-v1.1.0.json;type=application/json'
 ```

@@ -1,15 +1,21 @@
-use std::{env, net::SocketAddr};
+use std::{env, net::SocketAddr, sync::Arc, time::Duration as StdDuration};
 
+use aws_config::BehaviorVersion;
+use aws_sdk_s3::{Client as S3Client, presigning::PresigningConfig, primitives::ByteStream};
+use aws_types::region::Region;
 use axum::{
     Json, Router,
-    extract::{Path, Query, State},
+    extract::{Multipart, Path, Query, State},
     http::{HeaderMap, HeaderValue, StatusCode, header},
     response::{IntoResponse, Redirect, Response},
     routing::get,
 };
 use chrono::{DateTime, Duration, Utc};
+use jsonschema::JSONSchema;
 use reqwest::Client;
+use semver::Version;
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 use sha2::{Digest, Sha256};
 use sqlx::{FromRow, PgPool, postgres::PgPoolOptions};
 use thiserror::Error;
@@ -18,12 +24,16 @@ use url::Url;
 use uuid::Uuid;
 
 const SESSION_COOKIE_NAME: &str = "theme_store_session";
+const DEFAULT_THEME_FILE_NAME: &str = "theme.json";
 
 #[derive(Clone)]
 struct AppState {
     db: PgPool,
     auth: AuthConfig,
+    storage: StorageConfig,
     http_client: Client,
+    s3_client: S3Client,
+    theme_schema: Arc<JSONSchema>,
 }
 
 #[derive(Clone)]
@@ -34,6 +44,13 @@ struct AuthConfig {
     session_cookie_secure: bool,
     session_ttl_hours: i64,
     post_auth_redirect: Option<String>,
+}
+
+#[derive(Clone)]
+struct StorageConfig {
+    bucket: String,
+    key_prefix: String,
+    presign_ttl_seconds: u64,
 }
 
 #[tokio::main]
@@ -65,6 +82,34 @@ async fn main() -> anyhow::Result<()> {
         post_auth_redirect: env::var("POST_AUTH_REDIRECT").ok(),
     };
 
+    let storage = StorageConfig {
+        bucket: env::var("S3_BUCKET").map_err(|_| anyhow::anyhow!("S3_BUCKET must be set"))?,
+        key_prefix: env::var("S3_KEY_PREFIX").unwrap_or_else(|_| "themes".to_string()),
+        presign_ttl_seconds: env::var("S3_PRESIGN_TTL_SECONDS")
+            .ok()
+            .map(|value| parse_u64_env(&value, "S3_PRESIGN_TTL_SECONDS"))
+            .transpose()?
+            .unwrap_or(900),
+    };
+
+    let s3_region = env::var("S3_REGION").map_err(|_| anyhow::anyhow!("S3_REGION must be set"))?;
+    let s3_endpoint = env::var("S3_ENDPOINT").ok();
+
+    let mut aws_loader =
+        aws_config::defaults(BehaviorVersion::latest()).region(Region::new(s3_region));
+    if let Some(endpoint) = s3_endpoint {
+        aws_loader = aws_loader.endpoint_url(endpoint);
+    }
+    let aws_config = aws_loader.load().await;
+    let s3_client = S3Client::new(&aws_config);
+
+    let theme_schema_json: Value = serde_json::from_str(include_str!("../../../theme.schema.json"))
+        .map_err(|err| anyhow::anyhow!("failed to parse theme.schema.json at startup: {err}"))?;
+    let theme_schema =
+        Arc::new(JSONSchema::compile(&theme_schema_json).map_err(|err| {
+            anyhow::anyhow!("failed to compile theme.schema.json at startup: {err}")
+        })?);
+
     let pool = PgPoolOptions::new()
         .max_connections(10)
         .connect(&database_url)
@@ -75,7 +120,10 @@ async fn main() -> anyhow::Result<()> {
     let state = AppState {
         db: pool,
         auth,
+        storage,
         http_client: Client::builder().build()?,
+        s3_client,
+        theme_schema,
     };
     let app = build_router(state);
 
@@ -97,6 +145,7 @@ fn build_router(state: AppState) -> Router {
         .route("/auth/github/callback", get(auth_github_callback))
         .route("/auth/me", get(auth_me))
         .route("/auth/logout", axum::routing::post(auth_logout))
+        .route("/themes/me", get(list_my_themes))
         .route("/themes", get(list_themes).post(create_theme))
         .route("/themes/{slug}", get(get_theme).patch(update_theme))
         .route(
@@ -153,6 +202,8 @@ struct Theme {
     description: String,
     latest_version: Option<String>,
     file_key: Option<String>,
+    #[sqlx(default)]
+    file_url: Option<String>,
     github_username_claim: String,
     github_user_id_claim: Option<i64>,
     is_public: bool,
@@ -167,6 +218,8 @@ struct ThemeVersion {
     theme_id: Uuid,
     version: String,
     file_key: String,
+    #[sqlx(default)]
+    file_url: Option<String>,
     changelog: String,
     checksum_sha256: Option<String>,
     created_by: Option<String>,
@@ -184,32 +237,10 @@ struct AuthUser {
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
-struct CreateThemeRequest {
-    name: String,
-    slug: String,
-    description: Option<String>,
-    latest_version: Option<String>,
-    file_key: Option<String>,
-    github_username_claim: Option<String>,
-    is_public: Option<bool>,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
 struct UpdateThemeRequest {
     name: Option<String>,
     description: Option<String>,
     is_public: Option<bool>,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct PublishThemeVersionRequest {
-    version: String,
-    file_key: String,
-    changelog: Option<String>,
-    checksum_sha256: Option<String>,
-    created_by: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -235,6 +266,27 @@ struct GithubUserResponse {
     login: String,
     avatar_url: Option<String>,
     name: Option<String>,
+}
+
+#[derive(Debug)]
+struct CreateThemeUpload {
+    name: String,
+    description: String,
+    is_public: bool,
+    version: String,
+    changelog: Option<String>,
+    checksum_sha256: Option<String>,
+    github_username_claim: Option<String>,
+    theme_json: Vec<u8>,
+}
+
+#[derive(Debug)]
+struct PublishThemeVersionUpload {
+    version: String,
+    changelog: Option<String>,
+    checksum_sha256: Option<String>,
+    created_by: Option<String>,
+    theme_json: Vec<u8>,
 }
 
 #[derive(Debug, Serialize)]
@@ -441,7 +493,7 @@ async fn auth_logout(
 }
 
 async fn list_themes(State(state): State<AppState>) -> Result<Json<Vec<Theme>>, ApiError> {
-    let themes = sqlx::query_as::<_, Theme>(
+    let mut themes = sqlx::query_as::<_, Theme>(
         r#"
         SELECT
             id,
@@ -463,6 +515,52 @@ async fn list_themes(State(state): State<AppState>) -> Result<Json<Vec<Theme>>, 
     .fetch_all(&state.db)
     .await?;
 
+    for theme in &mut themes {
+        attach_theme_file_url(&state, theme).await?;
+    }
+
+    Ok(Json(themes))
+}
+
+async fn list_my_themes(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+) -> Result<Json<Vec<Theme>>, ApiError> {
+    let auth_user = require_auth_user(&state, &headers).await?;
+
+    let mut themes = sqlx::query_as::<_, Theme>(
+        r#"
+        SELECT
+            id,
+            name,
+            slug,
+            description,
+            latest_version,
+            file_key,
+            github_username_claim,
+            github_user_id_claim,
+            is_public,
+            created_at,
+            updated_at
+        FROM theme
+        WHERE
+            github_user_id_claim = $1
+            OR (
+                github_user_id_claim IS NULL
+                AND lower(github_username_claim) = lower($2)
+            )
+        ORDER BY created_at DESC
+        "#,
+    )
+    .bind(auth_user.github_user_id)
+    .bind(auth_user.github_login)
+    .fetch_all(&state.db)
+    .await?;
+
+    for theme in &mut themes {
+        attach_theme_file_url(&state, theme).await?;
+    }
+
     Ok(Json(themes))
 }
 
@@ -471,23 +569,25 @@ async fn get_theme(
     State(state): State<AppState>,
     headers: HeaderMap,
 ) -> Result<Json<Theme>, ApiError> {
-    let theme = fetch_theme_by_slug(&state.db, &slug).await?;
+    let mut theme = fetch_theme_by_slug(&state.db, &slug).await?;
     ensure_can_read_theme(&theme, &state, &headers).await?;
+    attach_theme_file_url(&state, &mut theme).await?;
     Ok(Json(theme))
 }
 
 async fn create_theme(
     State(state): State<AppState>,
     headers: HeaderMap,
-    Json(request): Json<CreateThemeRequest>,
+    multipart: Multipart,
 ) -> Result<(StatusCode, Json<Theme>), ApiError> {
     let auth_user = require_auth_user(&state, &headers).await?;
+    let payload = parse_create_theme_upload(multipart).await?;
+    let normalized_version = parse_semver_version(&payload.version, "version")?;
+    let generated_slug = generate_unique_slug(&state.db, &payload.name).await?;
 
-    validate_slug(&request.slug)?;
-    let name = parse_required_field(request.name, "name")?;
-    let slug = parse_required_field(request.slug, "slug")?;
+    validate_theme_json(&state.theme_schema, &payload.theme_json)?;
 
-    if let Some(claimed_login) = request.github_username_claim
+    if let Some(claimed_login) = payload.github_username_claim
         && !claimed_login.eq_ignore_ascii_case(&auth_user.github_login)
     {
         return Err(ApiError::BadRequest(
@@ -495,14 +595,14 @@ async fn create_theme(
         ));
     }
 
-    if request.latest_version.is_some() ^ request.file_key.is_some() {
-        return Err(ApiError::BadRequest(
-            "latestVersion and fileKey must either both be set or both be omitted".to_string(),
-        ));
-    }
+    let file_key = build_theme_file_key(
+        &state.storage.key_prefix,
+        &generated_slug,
+        &normalized_version,
+    );
+    upload_theme_to_s3(&state, &file_key, &payload.theme_json).await?;
 
-    let description = request.description.unwrap_or_default();
-    let is_public = request.is_public.unwrap_or(true);
+    let mut tx = state.db.begin().await?;
 
     let theme_result = sqlx::query_as::<_, Theme>(
         r#"
@@ -531,24 +631,53 @@ async fn create_theme(
             updated_at
         "#,
     )
-    .bind(name)
-    .bind(slug)
-    .bind(description)
-    .bind(request.latest_version)
-    .bind(request.file_key)
+    .bind(payload.name)
+    .bind(generated_slug)
+    .bind(payload.description)
+    .bind(normalized_version.clone())
+    .bind(file_key.clone())
     .bind(auth_user.github_login)
     .bind(auth_user.github_user_id)
-    .bind(is_public)
-    .fetch_one(&state.db)
+    .bind(payload.is_public)
+    .fetch_one(&mut *tx)
     .await;
 
-    match theme_result {
-        Ok(theme) => Ok((StatusCode::CREATED, Json(theme))),
+    let theme = match theme_result {
+        Ok(theme) => theme,
         Err(err) if is_unique_violation(&err) => {
-            Err(ApiError::Conflict("theme slug already exists".to_string()))
+            return Err(ApiError::Conflict("theme slug already exists".to_string()));
         }
-        Err(err) => Err(ApiError::from(err)),
-    }
+        Err(err) => return Err(ApiError::from(err)),
+    };
+
+    sqlx::query(
+        r#"
+        INSERT INTO theme_version (
+            theme_id,
+            version,
+            file_key,
+            changelog,
+            checksum_sha256,
+            created_by
+        )
+        VALUES ($1, $2, $3, $4, $5, $6)
+        "#,
+    )
+    .bind(theme.id)
+    .bind(normalized_version)
+    .bind(file_key)
+    .bind(payload.changelog.unwrap_or_default())
+    .bind(payload.checksum_sha256)
+    .bind(Some(theme.github_username_claim.clone()))
+    .execute(&mut *tx)
+    .await?;
+
+    tx.commit().await?;
+
+    let mut theme = theme;
+    attach_theme_file_url(&state, &mut theme).await?;
+
+    Ok((StatusCode::CREATED, Json(theme)))
 }
 
 async fn update_theme(
@@ -575,7 +704,7 @@ async fn update_theme(
         .map(|value| parse_required_field(value, "name"))
         .transpose()?;
 
-    let theme = sqlx::query_as::<_, Theme>(
+    let mut theme = sqlx::query_as::<_, Theme>(
         r#"
         UPDATE theme
         SET
@@ -605,6 +734,8 @@ async fn update_theme(
     .fetch_one(&state.db)
     .await?;
 
+    attach_theme_file_url(&state, &mut theme).await?;
+
     Ok(Json(theme))
 }
 
@@ -612,14 +743,51 @@ async fn publish_theme_version(
     Path(slug): Path<String>,
     State(state): State<AppState>,
     headers: HeaderMap,
-    Json(request): Json<PublishThemeVersionRequest>,
+    multipart: Multipart,
 ) -> Result<(StatusCode, Json<PublishThemeVersionResponse>), ApiError> {
     let auth_user = require_auth_user(&state, &headers).await?;
     let current_theme = fetch_theme_by_slug(&state.db, &slug).await?;
     ensure_theme_owner(&current_theme, &auth_user)?;
 
-    let version = parse_required_field(request.version, "version")?;
-    let file_key = parse_required_field(request.file_key, "fileKey")?;
+    let payload = parse_publish_theme_version_upload(multipart).await?;
+    let normalized_version = parse_semver_version(&payload.version, "version")?;
+    validate_theme_json(&state.theme_schema, &payload.theme_json)?;
+
+    if let Some(current_latest) = &current_theme.latest_version
+        && let Ok(current_latest_version) = Version::parse(current_latest)
+    {
+        let next = Version::parse(&normalized_version).map_err(|err| {
+            ApiError::BadRequest(format!(
+                "version must be a valid semantic version (e.g. 1.2.3): {err}"
+            ))
+        })?;
+        if next <= current_latest_version {
+            return Err(ApiError::BadRequest(format!(
+                "version must be greater than current latest version ({current_latest})"
+            )));
+        }
+    }
+
+    let existing_version = sqlx::query_scalar::<_, Option<Uuid>>(
+        "SELECT id FROM theme_version WHERE theme_id = $1 AND version = $2",
+    )
+    .bind(current_theme.id)
+    .bind(&normalized_version)
+    .fetch_optional(&state.db)
+    .await?
+    .flatten();
+    if existing_version.is_some() {
+        return Err(ApiError::Conflict(
+            "this version already exists for the theme".to_string(),
+        ));
+    }
+
+    let file_key = build_theme_file_key(
+        &state.storage.key_prefix,
+        &current_theme.slug,
+        &normalized_version,
+    );
+    upload_theme_to_s3(&state, &file_key, &payload.theme_json).await?;
 
     let mut transaction = state.db.begin().await?;
 
@@ -647,15 +815,15 @@ async fn publish_theme_version(
         "#,
     )
     .bind(current_theme.id)
-    .bind(version.clone())
+    .bind(normalized_version.clone())
     .bind(file_key.clone())
-    .bind(request.changelog.unwrap_or_default())
-    .bind(request.checksum_sha256)
-    .bind(request.created_by)
+    .bind(payload.changelog.unwrap_or_default())
+    .bind(payload.checksum_sha256)
+    .bind(payload.created_by.or(Some(auth_user.github_login)))
     .fetch_one(&mut *transaction)
     .await;
 
-    let inserted_version = match version_result {
+    let mut inserted_version = match version_result {
         Ok(inserted) => inserted,
         Err(err) if is_unique_violation(&err) => {
             return Err(ApiError::Conflict(
@@ -665,7 +833,7 @@ async fn publish_theme_version(
         Err(err) => return Err(ApiError::from(err)),
     };
 
-    let updated_theme = sqlx::query_as::<_, Theme>(
+    let mut updated_theme = sqlx::query_as::<_, Theme>(
         r#"
         UPDATE theme
         SET
@@ -687,13 +855,15 @@ async fn publish_theme_version(
             updated_at
         "#,
     )
-    .bind(version)
+    .bind(normalized_version)
     .bind(file_key)
     .bind(current_theme.id)
     .fetch_one(&mut *transaction)
     .await?;
 
     transaction.commit().await?;
+    attach_theme_file_url(&state, &mut updated_theme).await?;
+    attach_version_file_url(&state, &mut inserted_version).await?;
 
     Ok((
         StatusCode::CREATED,
@@ -709,10 +879,10 @@ async fn list_theme_versions(
     State(state): State<AppState>,
     headers: HeaderMap,
 ) -> Result<Json<ThemeWithVersionsResponse>, ApiError> {
-    let theme = fetch_theme_by_slug(&state.db, &slug).await?;
+    let mut theme = fetch_theme_by_slug(&state.db, &slug).await?;
     ensure_can_read_theme(&theme, &state, &headers).await?;
 
-    let versions = sqlx::query_as::<_, ThemeVersion>(
+    let mut versions = sqlx::query_as::<_, ThemeVersion>(
         r#"
         SELECT
             id,
@@ -732,6 +902,11 @@ async fn list_theme_versions(
     .bind(theme.id)
     .fetch_all(&state.db)
     .await?;
+
+    attach_theme_file_url(&state, &mut theme).await?;
+    for version in &mut versions {
+        attach_version_file_url(&state, version).await?;
+    }
 
     Ok(Json(ThemeWithVersionsResponse { theme, versions }))
 }
@@ -761,6 +936,199 @@ async fn fetch_theme_by_slug(pool: &PgPool, slug: &str) -> Result<Theme, ApiErro
     .ok_or_else(|| ApiError::NotFound("theme not found".to_string()))?;
 
     Ok(theme)
+}
+
+async fn parse_create_theme_upload(
+    mut multipart: Multipart,
+) -> Result<CreateThemeUpload, ApiError> {
+    let mut name: Option<String> = None;
+    let mut description: Option<String> = None;
+    let mut is_public: Option<bool> = None;
+    let mut version: Option<String> = None;
+    let mut changelog: Option<String> = None;
+    let mut checksum_sha256: Option<String> = None;
+    let mut github_username_claim: Option<String> = None;
+    let mut theme_json: Option<Vec<u8>> = None;
+
+    while let Some(field) = multipart.next_field().await.map_err(multipart_error)? {
+        let field_name = field.name().unwrap_or_default().to_string();
+
+        match field_name.as_str() {
+            "name" => {
+                name = Some(parse_required_field(
+                    field.text().await.map_err(multipart_error)?,
+                    "name",
+                )?);
+            }
+            "description" => {
+                description = Some(field.text().await.map_err(multipart_error)?);
+            }
+            "isPublic" => {
+                let raw = field.text().await.map_err(multipart_error)?;
+                is_public = Some(parse_bool_field(&raw, "isPublic")?);
+            }
+            "version" => {
+                version = Some(parse_required_field(
+                    field.text().await.map_err(multipart_error)?,
+                    "version",
+                )?);
+            }
+            "changelog" => {
+                changelog = Some(field.text().await.map_err(multipart_error)?);
+            }
+            "checksumSha256" => {
+                checksum_sha256 = Some(field.text().await.map_err(multipart_error)?);
+            }
+            "githubUsernameClaim" => {
+                github_username_claim = Some(field.text().await.map_err(multipart_error)?);
+            }
+            "themeFile" | "file" => {
+                theme_json = Some(field.bytes().await.map_err(multipart_error)?.to_vec());
+            }
+            _ => {}
+        }
+    }
+
+    let name = name.ok_or_else(|| ApiError::BadRequest("name is required".to_string()))?;
+    let version = version.unwrap_or_else(|| "1.0.0".to_string());
+    let theme_json =
+        theme_json.ok_or_else(|| ApiError::BadRequest("themeFile JSON is required".to_string()))?;
+
+    Ok(CreateThemeUpload {
+        name,
+        description: description.unwrap_or_default(),
+        is_public: is_public.unwrap_or(true),
+        version,
+        changelog,
+        checksum_sha256,
+        github_username_claim,
+        theme_json,
+    })
+}
+
+async fn parse_publish_theme_version_upload(
+    mut multipart: Multipart,
+) -> Result<PublishThemeVersionUpload, ApiError> {
+    let mut version: Option<String> = None;
+    let mut changelog: Option<String> = None;
+    let mut checksum_sha256: Option<String> = None;
+    let mut created_by: Option<String> = None;
+    let mut theme_json: Option<Vec<u8>> = None;
+
+    while let Some(field) = multipart.next_field().await.map_err(multipart_error)? {
+        let field_name = field.name().unwrap_or_default().to_string();
+
+        match field_name.as_str() {
+            "version" => {
+                version = Some(parse_required_field(
+                    field.text().await.map_err(multipart_error)?,
+                    "version",
+                )?);
+            }
+            "changelog" => {
+                changelog = Some(field.text().await.map_err(multipart_error)?);
+            }
+            "checksumSha256" => {
+                checksum_sha256 = Some(field.text().await.map_err(multipart_error)?);
+            }
+            "createdBy" => {
+                created_by = Some(field.text().await.map_err(multipart_error)?);
+            }
+            "themeFile" | "file" => {
+                theme_json = Some(field.bytes().await.map_err(multipart_error)?.to_vec());
+            }
+            _ => {}
+        }
+    }
+
+    let version = version.ok_or_else(|| ApiError::BadRequest("version is required".to_string()))?;
+    let theme_json =
+        theme_json.ok_or_else(|| ApiError::BadRequest("themeFile JSON is required".to_string()))?;
+
+    Ok(PublishThemeVersionUpload {
+        version,
+        changelog,
+        checksum_sha256,
+        created_by,
+        theme_json,
+    })
+}
+
+fn validate_theme_json(schema: &JSONSchema, json_bytes: &[u8]) -> Result<(), ApiError> {
+    let payload = serde_json::from_slice::<Value>(json_bytes)
+        .map_err(|err| ApiError::BadRequest(format!("themeFile must be valid JSON: {err}")))?;
+
+    if let Err(errors) = schema.validate(&payload) {
+        let details = errors
+            .take(3)
+            .map(|err| err.to_string())
+            .collect::<Vec<_>>()
+            .join("; ");
+        return Err(ApiError::BadRequest(format!(
+            "theme JSON does not match theme.schema.json: {details}"
+        )));
+    }
+
+    Ok(())
+}
+
+async fn upload_theme_to_s3(state: &AppState, key: &str, payload: &[u8]) -> Result<(), ApiError> {
+    state
+        .s3_client
+        .put_object()
+        .bucket(&state.storage.bucket)
+        .key(key)
+        .content_type("application/json")
+        .body(ByteStream::from(payload.to_vec()))
+        .send()
+        .await
+        .map_err(|err| ApiError::Storage(format!("failed to upload theme JSON to S3: {err}")))?;
+
+    Ok(())
+}
+
+async fn attach_theme_file_url(state: &AppState, theme: &mut Theme) -> Result<(), ApiError> {
+    theme.file_url = match &theme.file_key {
+        Some(key) => Some(presign_file_url(state, key).await?),
+        None => None,
+    };
+    Ok(())
+}
+
+async fn attach_version_file_url(
+    state: &AppState,
+    version: &mut ThemeVersion,
+) -> Result<(), ApiError> {
+    version.file_url = Some(presign_file_url(state, &version.file_key).await?);
+    Ok(())
+}
+
+async fn presign_file_url(state: &AppState, key: &str) -> Result<String, ApiError> {
+    let expires_in =
+        PresigningConfig::expires_in(StdDuration::from_secs(state.storage.presign_ttl_seconds))
+            .map_err(|err| {
+                ApiError::Storage(format!("failed to configure presign expiration: {err}"))
+            })?;
+
+    let request = state
+        .s3_client
+        .get_object()
+        .bucket(&state.storage.bucket)
+        .key(key)
+        .presigned(expires_in)
+        .await
+        .map_err(|err| ApiError::Storage(format!("failed to presign S3 URL: {err}")))?;
+
+    Ok(request.uri().to_string())
+}
+
+fn build_theme_file_key(prefix: &str, slug: &str, version: &str) -> String {
+    let prefix = prefix.trim_matches('/');
+    format!("{prefix}/{slug}/{version}/{DEFAULT_THEME_FILE_NAME}")
+}
+
+fn multipart_error(error: axum::extract::multipart::MultipartError) -> ApiError {
+    ApiError::BadRequest(format!("invalid multipart payload: {error}"))
 }
 
 async fn require_auth_user(state: &AppState, headers: &HeaderMap) -> Result<AuthUser, ApiError> {
@@ -823,6 +1191,16 @@ fn parse_required_field(value: String, field_name: &str) -> Result<String, ApiEr
     Ok(trimmed.to_string())
 }
 
+fn parse_bool_field(value: &str, field_name: &str) -> Result<bool, ApiError> {
+    match value.trim().to_ascii_lowercase().as_str() {
+        "1" | "true" | "yes" | "on" => Ok(true),
+        "0" | "false" | "no" | "off" => Ok(false),
+        _ => Err(ApiError::BadRequest(format!(
+            "{field_name} must be one of: true/false/1/0/yes/no/on/off"
+        ))),
+    }
+}
+
 fn validate_slug(slug: &str) -> Result<(), ApiError> {
     let slug = slug.trim();
     let is_valid = !slug.is_empty()
@@ -843,6 +1221,81 @@ fn validate_slug(slug: &str) -> Result<(), ApiError> {
     Ok(())
 }
 
+fn parse_semver_version(value: &str, field_name: &str) -> Result<String, ApiError> {
+    let trimmed = value.trim();
+    let parsed = Version::parse(trimmed).map_err(|err| {
+        ApiError::BadRequest(format!(
+            "{field_name} must be a valid semantic version (e.g. 1.2.3): {err}"
+        ))
+    })?;
+    Ok(parsed.to_string())
+}
+
+fn slugify_name(value: &str) -> Option<String> {
+    let mut slug = String::with_capacity(value.len());
+    let mut previous_was_dash = false;
+
+    for ch in value.chars() {
+        let mapped = if ch.is_ascii_alphanumeric() {
+            Some(ch.to_ascii_lowercase())
+        } else {
+            None
+        };
+
+        if let Some(character) = mapped {
+            slug.push(character);
+            previous_was_dash = false;
+        } else if !slug.is_empty() && !previous_was_dash {
+            slug.push('-');
+            previous_was_dash = true;
+        }
+    }
+
+    slug = slug.chars().take(64).collect::<String>();
+    let slug = slug.trim_matches('-').to_string();
+    if slug.is_empty() { None } else { Some(slug) }
+}
+
+async fn generate_unique_slug(pool: &PgPool, theme_name: &str) -> Result<String, ApiError> {
+    let base = slugify_name(theme_name).ok_or_else(|| {
+        ApiError::BadRequest(
+            "name must contain at least one ASCII letter or number to derive a slug".to_string(),
+        )
+    })?;
+
+    for suffix_number in 0..10_000_u32 {
+        let candidate = if suffix_number == 0 {
+            base.clone()
+        } else {
+            let suffix = format!("-{}", suffix_number + 1);
+            let max_base_len = 64usize.saturating_sub(suffix.len());
+            let trimmed_base = base
+                .trim_end_matches('-')
+                .chars()
+                .take(max_base_len)
+                .collect::<String>();
+            format!("{trimmed_base}{suffix}")
+        };
+
+        validate_slug(&candidate)?;
+
+        let exists = sqlx::query_scalar::<_, Option<Uuid>>("SELECT id FROM theme WHERE slug = $1")
+            .bind(&candidate)
+            .fetch_optional(pool)
+            .await?
+            .flatten()
+            .is_some();
+
+        if !exists {
+            return Ok(candidate);
+        }
+    }
+
+    Err(ApiError::Conflict(
+        "could not derive a unique slug from theme name".to_string(),
+    ))
+}
+
 fn parse_bool_env(value: &str, key: &str) -> anyhow::Result<bool> {
     match value.to_ascii_lowercase().as_str() {
         "1" | "true" | "yes" | "on" => Ok(true),
@@ -858,6 +1311,16 @@ fn parse_i64_env(value: &str, key: &str) -> anyhow::Result<i64> {
         .parse::<i64>()
         .map_err(|_| anyhow::anyhow!("{key} must be a valid integer"))?;
     if parsed <= 0 {
+        return Err(anyhow::anyhow!("{key} must be > 0"));
+    }
+    Ok(parsed)
+}
+
+fn parse_u64_env(value: &str, key: &str) -> anyhow::Result<u64> {
+    let parsed = value
+        .parse::<u64>()
+        .map_err(|_| anyhow::anyhow!("{key} must be a valid unsigned integer"))?;
+    if parsed == 0 {
         return Err(anyhow::anyhow!("{key} must be > 0"));
     }
     Ok(parsed)
@@ -936,6 +1399,8 @@ enum ApiError {
     Conflict(String),
     #[error("{0}")]
     ExternalAuth(String),
+    #[error("{0}")]
+    Storage(String),
     #[error("database error")]
     Database(#[from] sqlx::Error),
 }
@@ -949,6 +1414,7 @@ impl IntoResponse for ApiError {
             Self::NotFound(_) => StatusCode::NOT_FOUND,
             Self::Conflict(_) => StatusCode::CONFLICT,
             Self::ExternalAuth(_) => StatusCode::BAD_GATEWAY,
+            Self::Storage(_) => StatusCode::BAD_GATEWAY,
             Self::Database(_) => StatusCode::INTERNAL_SERVER_ERROR,
         };
 
@@ -970,7 +1436,7 @@ impl IntoResponse for ApiError {
 
 #[cfg(test)]
 mod tests {
-    use super::validate_slug;
+    use super::{parse_semver_version, slugify_name, validate_slug};
 
     #[test]
     fn accepts_valid_slug() {
@@ -983,5 +1449,22 @@ mod tests {
         assert!(validate_slug("-tokyo-night").is_err());
         assert!(validate_slug("tokyo-night-").is_err());
         assert!(validate_slug("tokyo_night").is_err());
+    }
+
+    #[test]
+    fn slugifies_theme_names() {
+        assert_eq!(slugify_name("Tokyo Night"), Some("tokyo-night".to_string()));
+        assert_eq!(slugify_name("___Midnight___"), Some("midnight".to_string()));
+        assert_eq!(slugify_name("!!!"), None);
+    }
+
+    #[test]
+    fn validates_semver_versions() {
+        assert_eq!(
+            parse_semver_version("1.2.3", "version").expect("semver should parse"),
+            "1.2.3"
+        );
+        assert!(parse_semver_version("v1.2.3", "version").is_err());
+        assert!(parse_semver_version("1", "version").is_err());
     }
 }
