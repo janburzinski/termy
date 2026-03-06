@@ -1896,6 +1896,13 @@ impl Render for TerminalView {
         if pane_focus_needs_animation {
             self.schedule_pane_focus_animation(cx);
         }
+        if self
+            .tab_strip
+            .switch_hints
+            .animation_active(now, self.tab_switch_hints_blocked())
+        {
+            self.schedule_tab_switch_hint_animation(cx);
+        }
         #[cfg(debug_assertions)]
         self.record_render_metrics_for_pass(render_pass_cache_counts);
 
@@ -2095,6 +2102,7 @@ impl Render for TerminalView {
                     .on_action(cx.listener(Self::handle_inline_delete_to_start_action))
                     .on_action(cx.listener(Self::handle_inline_delete_to_end_action))
                     .on_key_down(cx.listener(Self::handle_key_down))
+                    .on_modifiers_changed(cx.listener(Self::handle_modifiers_changed))
                     .on_scroll_wheel(cx.listener(Self::handle_terminal_scroll_wheel))
                     .on_mouse_down(MouseButton::Left, cx.listener(Self::handle_mouse_down))
                     .on_mouse_down(MouseButton::Middle, cx.listener(Self::handle_mouse_down))

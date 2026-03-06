@@ -1,6 +1,37 @@
 use super::*;
 
 impl TerminalView {
+    fn maybe_suppress_tab_switch_hint_for_key_down(
+        &mut self,
+        key: &str,
+        modifiers: gpui::Modifiers,
+        cx: &mut Context<Self>,
+    ) {
+        if self.tab_strip.switch_hints.suppress_for_key_down(
+            key,
+            modifiers,
+            self.tab_switch_hints_blocked(),
+            Instant::now(),
+        ) {
+            cx.notify();
+        }
+    }
+
+    pub(in super::super) fn handle_modifiers_changed(
+        &mut self,
+        event: &ModifiersChangedEvent,
+        _window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if self
+            .tab_strip
+            .switch_hints
+            .handle_modifiers_changed(event.modifiers, Instant::now())
+        {
+            cx.notify();
+        }
+    }
+
     fn send_input_to_active_pane(&self, input: &[u8]) -> bool {
         match self.runtime_kind() {
             RuntimeKind::Tmux => self.tmux_send_input_to_active_pane(input),
@@ -164,6 +195,7 @@ impl TerminalView {
     ) {
         self.reset_cursor_blink_phase();
         let key = event.keystroke.key.as_str();
+        self.maybe_suppress_tab_switch_hint_for_key_down(key, event.keystroke.modifiers, cx);
 
         if self.is_command_palette_open() {
             self.handle_command_palette_key_down(key, window, cx);

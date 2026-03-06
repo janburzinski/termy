@@ -12,9 +12,10 @@ use flume::{Sender, bounded};
 use gpui::AppContext;
 use gpui::{
     AnyElement, App, AsyncApp, ClipboardItem, Context, Element, Entity, ExternalPaths, FocusHandle,
-    Focusable, Font, FontWeight, InteractiveElement, IntoElement, KeyDownEvent, MouseButton,
-    MouseDownEvent, MouseMoveEvent, MouseUpEvent, ParentElement, Pixels, Render, ScrollWheelEvent,
-    SharedString, Size, StatefulInteractiveElement, Styled, TouchPhase, WeakEntity, Window,
+    Focusable, Font, FontWeight, InteractiveElement, IntoElement, KeyDownEvent,
+    ModifiersChangedEvent, MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent,
+    ParentElement, Pixels, Render, ScrollWheelEvent, SharedString, Size,
+    StatefulInteractiveElement, Styled, TouchPhase, WeakEntity, Window,
     WindowBackgroundAppearance, div, point, px,
 };
 use std::{
@@ -76,6 +77,7 @@ const TITLEBAR_HEIGHT: f32 = 34.0;
 const MAX_TAB_TITLE_CHARS: usize = 96;
 const DEFAULT_TAB_TITLE: &str = "Terminal";
 const COMMAND_TITLE_DELAY_MS: u64 = 250;
+#[cfg(not(test))]
 const CONFIG_WATCH_INTERVAL_MS: u64 = 750;
 const CURSOR_BLINK_INTERVAL_MS: u64 = 530;
 const TMUX_TITLE_REFRESH_DEBOUNCE_MS: u64 = 120;
@@ -142,6 +144,7 @@ const SEARCH_INPUT_SELECTION_ALPHA: f32 = 0.30;
 const PANE_FOCUS_ANIMATION_MS: u64 = 140;
 const PANE_FOCUS_ANIMATION_FRAME_MS: u64 = 16;
 const PANE_FOCUS_ANIMATION_DURATION: Duration = Duration::from_millis(PANE_FOCUS_ANIMATION_MS);
+const TAB_SWITCH_HINT_ANIMATION_FRAME_MS: u64 = 16;
 const MAX_PANE_FOCUS_STRENGTH: f32 = 2.0;
 #[cfg(debug_assertions)]
 const RENDER_METRICS_LOG_INTERVAL: Duration = Duration::from_secs(1);
@@ -1419,6 +1422,36 @@ impl TerminalView {
         scaled_chrome_alpha_for_opacity(base_alpha, self.background_opacity)
     }
 
+    fn tab_switch_hints_blocked(&self) -> bool {
+        self.is_command_palette_open() || self.search_open || self.ai_input_open
+    }
+
+    pub(crate) fn tab_switch_hint_progress(&self, now: Instant) -> f32 {
+        self.tab_strip
+            .switch_hints
+            .progress(now, self.tab_switch_hints_blocked())
+    }
+
+    fn schedule_tab_switch_hint_animation(&mut self, cx: &mut Context<Self>) {
+        if !self.tab_strip.switch_hints.begin_animation_frame(
+            Instant::now(),
+            self.tab_switch_hints_blocked(),
+        ) {
+            return;
+        }
+
+        cx.spawn(async move |this: WeakEntity<Self>, cx: &mut AsyncApp| {
+            smol::Timer::after(Duration::from_millis(TAB_SWITCH_HINT_ANIMATION_FRAME_MS)).await;
+            let _ = cx.update(|cx| {
+                this.update(cx, |view, cx| {
+                    view.tab_strip.switch_hints.finish_animation_frame();
+                    cx.notify();
+                })
+            });
+        })
+        .detach();
+    }
+
     fn pane_focus_config(&self) -> Option<(PaneFocusPreset, f32)> {
         let preset = pane_focus_preset(self.pane_focus_effect)?;
         let strength = pane_focus_strength_factor(self.pane_focus_strength);
@@ -1797,6 +1830,8 @@ impl TerminalView {
         let blur_focus_handle = focus_handle.clone();
         let (event_wakeup_tx, event_wakeup_rx) = bounded(1);
         let config_change_rx = config::subscribe_config_changes();
+        #[cfg(test)]
+        let _ = &config_change_rx;
 
         // Focus the terminal immediately
         focus_handle.focus(window, cx);
@@ -1819,49 +1854,59 @@ impl TerminalView {
         })
         .detach();
 
-        // Reload immediately when config is updated in-process (e.g. settings/theme actions).
-        cx.spawn(async move |this: WeakEntity<Self>, cx: &mut AsyncApp| {
-            while config_change_rx.recv_async().await.is_ok() {
-                while config_change_rx.try_recv().is_ok() {}
-                let result = cx.update(|cx| {
-                    this.update(cx, |view, cx| {
-                        view.reload_config(cx);
-                        cx.notify();
-                    })
-                });
-                if result.is_err() {
-                    break;
-                }
-            }
-        })
-        .detach();
-
-        // Poll config file timestamp and hot-reload UI settings on change.
-        cx.spawn(async move |this: WeakEntity<Self>, cx: &mut AsyncApp| {
-            loop {
-                smol::Timer::after(Duration::from_millis(CONFIG_WATCH_INTERVAL_MS)).await;
-                let result = cx.update(|cx| {
-                    this.update(cx, |view, cx| {
-                        let config_changed = view.reload_config_if_changed(cx);
-                        let availability_changed = view.refresh_install_cli_availability();
-                        if availability_changed {
-                            view.refresh_command_palette_items_for_current_mode(cx);
-                            cx.set_menus(crate::menus::app_menus(
-                                view.install_cli_available(),
-                                view.runtime_uses_tmux(),
-                            ));
-                        }
-                        if config_changed || availability_changed {
+        #[cfg(not(test))]
+        {
+            // Reload immediately when config is updated in-process (e.g. settings/theme actions).
+            cx.spawn(async move |this: WeakEntity<Self>, cx: &mut AsyncApp| {
+                loop {
+                    let wait_rx = config_change_rx.clone();
+                    if smol::unblock(move || wait_rx.recv()).await.is_err() {
+                        break;
+                    }
+                    while config_change_rx.try_recv().is_ok() {}
+                    let result = cx.update(|cx| {
+                        this.update(cx, |view, cx| {
+                            view.reload_config(cx);
                             cx.notify();
-                        }
-                    })
-                });
-                if result.is_err() {
-                    break;
+                        })
+                    });
+                    if result.is_err() {
+                        break;
+                    }
                 }
-            }
-        })
-        .detach();
+            })
+            .detach();
+        }
+
+        #[cfg(not(test))]
+        {
+            // Poll config file timestamp and hot-reload UI settings on change.
+            cx.spawn(async move |this: WeakEntity<Self>, cx: &mut AsyncApp| {
+                loop {
+                    smol::Timer::after(Duration::from_millis(CONFIG_WATCH_INTERVAL_MS)).await;
+                    let result = cx.update(|cx| {
+                        this.update(cx, |view, cx| {
+                            let config_changed = view.reload_config_if_changed(cx);
+                            let availability_changed = view.refresh_install_cli_availability();
+                            if availability_changed {
+                                view.refresh_command_palette_items_for_current_mode(cx);
+                                cx.set_menus(crate::menus::app_menus(
+                                    view.install_cli_available(),
+                                    view.runtime_uses_tmux(),
+                                ));
+                            }
+                            if config_changed || availability_changed {
+                                cx.notify();
+                            }
+                        })
+                    });
+                    if result.is_err() {
+                        break;
+                    }
+                }
+            })
+            .detach();
+        }
 
         // Toggle cursor visibility for blink in both terminal and inline inputs.
         cx.spawn(async move |this: WeakEntity<Self>, cx: &mut AsyncApp| {
@@ -1988,7 +2033,7 @@ impl TerminalView {
             overlay_view: None,
             command_palette: CommandPaletteState::new(config.command_palette_show_keybinds),
             install_cli_available: Self::install_cli_available_from_system(),
-            tab_strip: TabStripState::new(),
+            tab_strip: TabStripState::new(config.tab_switch_modifier_hints),
             inline_input_selecting: false,
             mouse_reporting: MouseReportingState::default(),
             terminal_scroll_accumulator_y: 0.0,
@@ -2052,7 +2097,9 @@ impl TerminalView {
         })
         .detach();
         cx.on_blur(&blur_focus_handle, window, |view, _window, cx| {
-            if view.release_all_forwarded_mouse_presses() {
+            let released_mouse_presses = view.release_all_forwarded_mouse_presses();
+            let cleared_tab_switch_hint_state = view.tab_strip.switch_hints.reset_hold_state();
+            if released_mouse_presses || cleared_tab_switch_hint_state {
                 cx.notify();
             }
         })
@@ -2099,6 +2146,8 @@ impl TerminalView {
         self.tab_title = config.tab_title.clone();
         let tab_close_visibility_changed = self.tab_close_visibility != config.tab_close_visibility;
         let tab_width_mode_changed = self.tab_width_mode != config.tab_width_mode;
+        let tab_switch_modifier_hints_changed =
+            self.tab_strip.switch_hints.sync_enabled(config.tab_switch_modifier_hints);
         let show_termy_in_titlebar_changed =
             self.show_termy_in_titlebar != config.show_termy_in_titlebar;
         self.tab_close_visibility = config.tab_close_visibility;
@@ -2198,6 +2247,9 @@ impl TerminalView {
         {
             self.mark_tab_strip_layout_dirty();
         }
+        if tab_switch_modifier_hints_changed {
+            cx.notify();
+        }
 
         if self.is_command_palette_open() {
             self.refresh_command_palette_matches(true, cx);
@@ -2206,6 +2258,7 @@ impl TerminalView {
         true
     }
 
+    #[cfg(not(test))]
     fn reload_config_if_changed(&mut self, cx: &mut Context<Self>) -> bool {
         let path = match self.config_path.clone() {
             Some(path) => path,

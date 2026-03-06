@@ -1,5 +1,6 @@
 use super::super::*;
 use super::chrome;
+use super::hints::TabSwitchHintState;
 use super::layout::TabStripGeometry;
 use super::state::{TabDropMarkerSide, TabStripOverflowState};
 use gpui::{Hsla, TextRun};
@@ -14,6 +15,9 @@ struct TabStripPalette {
     inactive_tab_text: gpui::Rgba,
     close_button_hover_bg: gpui::Rgba,
     close_button_hover_text: gpui::Rgba,
+    switch_hint_bg: gpui::Rgba,
+    switch_hint_border: gpui::Rgba,
+    switch_hint_text: gpui::Rgba,
     tab_drop_marker_color: gpui::Rgba,
     tabbar_new_tab_bg: gpui::Rgba,
     tabbar_new_tab_hover_bg: gpui::Rgba,
@@ -164,6 +168,7 @@ mod tests {
         assert!(!collisions.left);
         assert!(!collisions.right);
     }
+
 }
 
 struct TabStripRenderState {
@@ -184,6 +189,7 @@ struct TabItemRenderInput {
     tab_width: f32,
     tab_strokes: chrome::TabStrokeRects,
     label: String,
+    switch_hint_label: Option<String>,
     is_active: bool,
     is_hovered: bool,
     is_renaming: bool,
@@ -359,6 +365,14 @@ impl TerminalView {
         close_button_hover_bg.a = self.scaled_chrome_alpha(0.24);
         let mut close_button_hover_text = colors.foreground;
         close_button_hover_text.a = 0.98;
+        let now = Instant::now();
+        let hint_progress = self.tab_switch_hint_progress(now);
+        let mut switch_hint_bg = colors.cursor;
+        switch_hint_bg.a = self.scaled_chrome_alpha(0.18 * hint_progress);
+        let mut switch_hint_border = colors.cursor;
+        switch_hint_border.a = self.scaled_chrome_alpha(0.52 * hint_progress);
+        let mut switch_hint_text = colors.foreground;
+        switch_hint_text.a = (0.99 * hint_progress).clamp(0.0, 1.0);
         let mut tab_drop_marker_color = colors.cursor;
         tab_drop_marker_color.a = self.scaled_chrome_alpha(0.95);
         let mut tabbar_new_tab_bg = colors.foreground;
@@ -383,6 +397,9 @@ impl TerminalView {
             inactive_tab_text,
             close_button_hover_bg,
             close_button_hover_text,
+            switch_hint_bg,
+            switch_hint_border,
+            switch_hint_text,
             tab_drop_marker_color,
             tabbar_new_tab_bg,
             tabbar_new_tab_hover_bg,
@@ -677,6 +694,25 @@ impl TerminalView {
             })
             .cursor_pointer();
 
+        let accessory_slot = if let Some(label) = input.switch_hint_label {
+            div()
+                .flex_none()
+                .w(px(input.close_slot_width))
+                .h(px(TAB_CLOSE_HITBOX))
+                .flex()
+                .items_center()
+                .justify_center()
+                .border_l_1()
+                .border_color(palette.switch_hint_border)
+                .bg(palette.switch_hint_bg)
+                .text_color(palette.switch_hint_text)
+                .text_size(px(TAB_SWITCH_HINT_TEXT_SIZE))
+                .font_weight(FontWeight::MEDIUM)
+                .child(label)
+        } else {
+            close_button
+        };
+
         let tab_shell = div()
             .flex_none()
             .relative()
@@ -768,7 +804,7 @@ impl TerminalView {
                         title_text.child(input.label).into_any_element()
                     }),
             )
-            .child(close_button)
+            .child(accessory_slot)
             .children(drop_marker)
             .into_any_element()
     }
@@ -784,6 +820,7 @@ impl TerminalView {
         colors: &TerminalColors,
         cx: &mut Context<Self>,
     ) -> AnyElement {
+        let now = Instant::now();
         let mut tabs_scroll_content = div()
             .id("tabs-scroll-content")
             .flex_none()
@@ -813,7 +850,7 @@ impl TerminalView {
             };
             let is_active = index == self.active_tab;
             let is_hovered = self.tab_strip.hovered_tab == Some(index);
-            let show_tab_close = Self::tab_shows_close(
+            let show_close_button = Self::tab_shows_close(
                 self.tab_close_visibility,
                 is_active,
                 self.tab_strip.hovered_tab,
@@ -821,7 +858,17 @@ impl TerminalView {
                 index,
             );
             let is_renaming = self.renaming_tab == Some(index);
-            let close_slot_width = if show_tab_close {
+            let show_switch_hint = self.tab_strip.switch_hints.should_render(
+                index,
+                is_renaming,
+                self.tab_switch_hints_blocked(),
+                now,
+            );
+            let switch_hint_label = show_switch_hint
+                .then(|| TabSwitchHintState::label_for_index(index))
+                .flatten();
+            let show_tab_close = show_close_button && switch_hint_label.is_none();
+            let close_slot_width = if show_tab_close || switch_hint_label.is_some() {
                 TAB_CLOSE_SLOT_WIDTH
             } else {
                 0.0
@@ -841,6 +888,7 @@ impl TerminalView {
                     tab_width,
                     tab_strokes: state.chrome_layout.tab_strokes[index],
                     label,
+                    switch_hint_label,
                     is_active,
                     is_hovered,
                     is_renaming,

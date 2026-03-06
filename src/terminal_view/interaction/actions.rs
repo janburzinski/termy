@@ -14,6 +14,20 @@ impl TerminalView {
         self.has_active_inline_input()
     }
 
+    fn maybe_suppress_tab_switch_hint_for_action(
+        &mut self,
+        action: CommandAction,
+        cx: &mut Context<Self>,
+    ) {
+        if self.tab_strip.switch_hints.suppress_for_action(
+            action,
+            self.tab_switch_hints_blocked(),
+            Instant::now(),
+        ) {
+            cx.notify();
+        }
+    }
+
     pub(in super::super) fn execute_command_action(
         &mut self,
         action: CommandAction,
@@ -21,6 +35,8 @@ impl TerminalView {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        self.maybe_suppress_tab_switch_hint_for_action(action, cx);
+
         #[cfg(target_os = "windows")]
         if action == CommandAction::ManageTmuxSessions || action.to_command_id().is_tmux_only() {
             // Defensive guard: custom keybinds can still target tmux actions even when
