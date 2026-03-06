@@ -33,6 +33,10 @@ enum Action {
     #[command(name = "-list-plugins")]
     ListPlugins,
 
+    /// Create a starter plugin scaffold
+    #[command(name = "-plugin-init")]
+    PluginInit,
+
     /// List available themes
     #[command(name = "-list-themes")]
     ListThemes,
@@ -79,6 +83,7 @@ fn main() {
         Some(Action::ListFonts) => commands::list_fonts::run(),
         Some(Action::ListKeybinds) => commands::list_keybinds::run(),
         Some(Action::ListPlugins) => commands::list_plugins::run(),
+        Some(Action::PluginInit) => commands::plugin_init::run(),
         Some(Action::ListThemes) => commands::list_themes::run(),
         Some(Action::ListColors) => commands::list_colors::run(),
         Some(Action::ListActions) => commands::list_actions::run(),
