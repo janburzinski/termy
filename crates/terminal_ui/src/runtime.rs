@@ -11,7 +11,7 @@ use alacritty_terminal::{
     sync::FairMutex,
     term::{Config as TermConfig, LineDamageBounds, Term, TermDamage, TermMode},
     tty::{self, Options as PtyOptions, Shell},
-    vte::ansi::{CursorShape, CursorStyle as AlacrittyCursorStyle},
+    vte::ansi::{self, CursorShape, CursorStyle as AlacrittyCursorStyle},
 };
 use flume::{Receiver, Sender, unbounded};
 use gpui::{Keystroke, Modifiers, Pixels, px};
@@ -510,6 +510,7 @@ pub struct JsonEventListener {
     events_tx: Sender<AlacEvent>,
     wake_tx: Option<Sender<()>>,
     wakeup_queued: Arc<AtomicBool>,
+    replay_suppressed: Arc<AtomicBool>,
 }
 
 impl JsonEventListener {
@@ -522,12 +523,23 @@ impl JsonEventListener {
             events_tx,
             wake_tx,
             wakeup_queued,
+            replay_suppressed: Arc::new(AtomicBool::new(false)),
         }
+    }
+
+    fn set_replay_suppressed(&self, suppressed: bool) {
+        self.replay_suppressed.store(suppressed, Ordering::Release);
     }
 }
 
 impl EventListener for JsonEventListener {
     fn send_event(&self, event: AlacEvent) {
+        if self.replay_suppressed.load(Ordering::Acquire) {
+            if matches!(event, AlacEvent::Wakeup) {
+                return;
+            }
+            return;
+        }
         match event {
             // Coalesce wakeups to keep event queue bounded under heavy output.
             AlacEvent::Wakeup => {
@@ -610,6 +622,10 @@ impl Dimensions for TerminalSize {
 pub struct Terminal {
     /// The alacritty terminal emulator
     term: Arc<FairMutex<Term<JsonEventListener>>>,
+    /// Listener clone used to suppress side effects during replay hydration.
+    listener: JsonEventListener,
+    /// Parser used for buffer rehydration without writing to the PTY.
+    parser: FairMutex<ansi::Processor>,
     /// Channel to send input to the PTY
     pty_tx: Notifier,
     /// Channel to receive events from alacritty
@@ -680,12 +696,14 @@ impl Terminal {
         let child_pid = pty_child_pid(&pty);
 
         // Create and spawn the event loop
-        let event_loop = EventLoop::new(term.clone(), listener, pty, false, false)?;
+        let event_loop = EventLoop::new(term.clone(), listener.clone(), pty, false, false)?;
         let pty_tx = Notifier(event_loop.channel());
         let _io_thread = event_loop.spawn();
 
         Ok(Self {
             term,
+            listener: listener.clone(),
+            parser: FairMutex::new(ansi::Processor::new()),
             pty_tx,
             events_rx,
             size,
@@ -701,6 +719,19 @@ impl Terminal {
     /// Write bytes to the PTY (user input)
     pub fn write(&self, input: &[u8]) {
         let _ = self.pty_tx.0.send(Msg::Input(input.to_vec().into()));
+    }
+
+    /// Rehydrate saved terminal output into the in-memory grid without sending input to the PTY.
+    pub fn hydrate_output(&self, bytes: &[u8]) {
+        if bytes.is_empty() {
+            return;
+        }
+
+        self.listener.set_replay_suppressed(true);
+        let mut parser = self.parser.lock();
+        let mut term = self.term.lock();
+        parser.advance(&mut *term, bytes);
+        self.listener.set_replay_suppressed(false);
     }
 
     /// Write a string to the PTY
