@@ -72,6 +72,7 @@ Use the Command Palette and run `Check for updates`.
 - plugin_core Reference: `/docs/plugins/plugin-core`
 - plugin_host Reference: `/docs/plugins/plugin-host`
 - plugin_sdk (Rust) Reference: `/docs/plugins/plugin-sdk-rust`
+- go-bindings Reference: `/docs/plugins/go-bindings`
 - ts-bindings Reference: `/docs/plugins/ts-bindings`
 - Troubleshooting: `/docs/troubleshooting`
 - FAQ: `/docs/faq`
@@ -232,6 +233,69 @@ Types:
 - `ProtocolVersionMismatch`
 - `PluginIdMismatch`
 - `UnexpectedMessage`
+
+### go-bindings API (`github.com/lassejlv/termy/bindings/go-bindings`)
+
+Constants:
+
+- `PluginManifestFileName`
+- `PluginProtocolVersion`
+
+Types:
+
+- `PluginRuntime`
+- `PluginPermission`
+- `PluginContributions`
+- `PluginCommandContribution`
+- `PluginManifest`
+- `HostHello`
+- `HostCommandInvocation`
+- `HostRPCMessage`
+- `PluginCapability`
+- `PluginHello`
+- `PluginLogLevel`
+- `PluginLogMessage`
+- `PluginToastLevel`
+- `PluginToastMessage`
+- `PluginRPCMessage`
+- `PluginMetadata`
+- `PluginSession`
+- `ProtocolVersionMismatchError`
+- `PluginIDMismatchError`
+- `UnexpectedMessageError`
+
+Variables:
+
+- `ErrHostClosedStream`
+
+`HostRPCMessage` methods:
+
+- `AsHello()`
+- `AsInvokeCommand()`
+
+Session/protocol functions:
+
+- `NewStdioSession(metadata)`
+- `NewSession(reader, writer, metadata)`
+- `CommandID(message)`
+- `ReadHostHello(reader)`
+- `ReadHostMessage(reader)`
+- `ParseHostRPCMessage(line)`
+- `ParsePluginRPCMessage(line)`
+- `SerializePluginRPCMessage(message)`
+- `NewPluginHelloMessage(payload)`
+- `NewPluginLogMessage(level, message)`
+- `NewPluginToastMessage(level, message, durationMS)`
+- `NewPluginPongMessage()`
+
+`PluginSession` methods:
+
+- `Recv()`
+- `Send(message)`
+- `SendLog(level, message)`
+- `SendPong()`
+- `SendToast(level, message, durationMS)`
+- `RunUntilShutdown(onMessage)`
 
 ### ts-bindings API (`@termy-oss/ts-bindings`)
 

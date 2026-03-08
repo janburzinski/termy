@@ -1,6 +1,6 @@
 ---
 title: Developing Plugins
-description: Build Termy plugins with Rust or TypeScript bindings
+description: Build Termy plugins with Rust, Go, or TypeScript bindings
 order: 2
 category: Plugins
 ---
@@ -10,11 +10,13 @@ Termy plugin processes communicate with the host over newline-delimited JSON on 
 For strongly-typed APIs use:
 
 - Rust: `crates/plugin_sdk`
-- TypeScript: `ts-bindings`
+- Go: `bindings/go-bindings`
+- TypeScript: `bindings/ts-bindings`
 
 Detailed API references:
 
 - [plugin_sdk (Rust) Reference](/docs/plugins/plugin-sdk-rust)
+- [go-bindings Reference](/docs/plugins/go-bindings)
 - [ts-bindings Reference](/docs/plugins/ts-bindings)
 - [plugin_core Reference](/docs/plugins/plugin-core)
 - [plugin_host Reference](/docs/plugins/plugin-host)
@@ -86,6 +88,42 @@ async function main(): Promise<void> {
 }
 
 void main();
+```
+
+## Go plugin quickstart
+
+```go
+package main
+
+import (
+	"log"
+
+	termybindings "github.com/lassejlv/termy/bindings/go-bindings"
+)
+
+func main() {
+	session, err := termybindings.NewStdioSession(termybindings.PluginMetadata{
+		PluginID: "example.hello",
+		Name:     "Hello Plugin",
+		Version:  "0.1.0",
+	})
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	err = session.RunUntilShutdown(func(message termybindings.HostRPCMessage, current *termybindings.PluginSession) error {
+		switch message.Type {
+		case "ping":
+			return current.SendPong()
+		case "invoke_command":
+			return current.SendLog(termybindings.PluginLogLevelInfo, "command invoked")
+		}
+		return nil
+	})
+	if err != nil {
+		log.Fatal(err)
+	}
+}
 ```
 
 ## Handshake rules

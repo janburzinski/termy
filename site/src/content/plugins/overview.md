@@ -12,6 +12,7 @@ Termy supports local plugins with a JSON manifest and a simple JSON-RPC protocol
 - [plugin_core Reference](/docs/plugins/plugin-core)
 - [plugin_host Reference](/docs/plugins/plugin-host)
 - [plugin_sdk (Rust) Reference](/docs/plugins/plugin-sdk-rust)
+- [go-bindings Reference](/docs/plugins/go-bindings)
 - [ts-bindings Reference](/docs/plugins/ts-bindings)
 
 ## Where plugins live
