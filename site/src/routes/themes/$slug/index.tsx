@@ -10,7 +10,7 @@ import {
   fetchThemeWithVersions,
 } from "@/lib/theme-store";
 
-export const Route = createFileRoute("/themes/$slug")({
+export const Route = createFileRoute("/themes/$slug/")({
   component: ThemeDetailPage,
 });
 
@@ -152,10 +152,7 @@ function ThemeDetailPage(): JSX.Element {
         </div>
 
         {/* Terminal preview */}
-        <div
-          className="animate-blur-in"
-          style={{ animationDelay: "300ms" }}
-        >
+        <div className="animate-blur-in" style={{ animationDelay: "300ms" }}>
           <div
             className="terminal-window"
             style={{
@@ -176,7 +173,9 @@ function ThemeDetailPage(): JSX.Element {
               <div className="terminal-dots">
                 <div
                   className="terminal-dot"
-                  style={{ backgroundColor: palette.red ?? fallbackPalette.red }}
+                  style={{
+                    backgroundColor: palette.red ?? fallbackPalette.red,
+                  }}
                 />
                 <div
                   className="terminal-dot"
@@ -205,10 +204,7 @@ function ThemeDetailPage(): JSX.Element {
         </div>
 
         {/* Version History */}
-        <div
-          className="animate-blur-in"
-          style={{ animationDelay: "400ms" }}
-        >
+        <div className="animate-blur-in" style={{ animationDelay: "400ms" }}>
           <div className="rounded-xl border border-border/40 bg-card/30 p-5 sm:p-6">
             <h2 className="text-lg font-semibold">Version History</h2>
             <p className="mt-1 text-sm text-muted-foreground">
