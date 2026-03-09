@@ -361,6 +361,15 @@ impl Terminal {
         }
     }
 
+    /// Re-send the current PTY size to deliver SIGWINCH without changing dimensions.
+    fn nudge_resize(&self) {
+        if let Self::Native(terminal) = self
+            && let Ok(terminal) = terminal.lock()
+        {
+            terminal.nudge_resize();
+        }
+    }
+
     fn size(&self) -> TerminalSize {
         match self {
             Self::Tmux(terminal) => terminal.size(),
