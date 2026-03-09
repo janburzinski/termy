@@ -1249,6 +1249,35 @@ impl TerminalView {
     }
 }
 
+impl TerminalView {
+    fn ime_marked_text_range_utf16(&self) -> Option<Range<usize>> {
+        let marked = self.ime_marked_text.as_ref()?;
+        let len_utf16 = marked.encode_utf16().count();
+        Some(0..len_utf16)
+    }
+
+    fn ime_cursor_bounds(&self) -> Option<Bounds<Pixels>> {
+        let geometry = self.terminal_viewport_geometry()?;
+        let pane = self.active_pane_ref()?;
+        let size = pane.terminal.size();
+        let cell_width: f32 = size.cell_width.into();
+        let cell_height: f32 = size.cell_height.into();
+        let cursor = pane.terminal.cursor_state()?;
+        let (cursor_col, cursor_row) = (cursor.col, cursor.row);
+        let x = geometry.origin_x + (cursor_col as f32) * cell_width;
+        let y = geometry.origin_y + (cursor_row as f32) * cell_height;
+        Some(Bounds::new(
+            point(px(x), px(y)),
+            gpui::size(px(cell_width), px(cell_height)),
+        ))
+    }
+
+    fn is_alt_screen(&self) -> bool {
+        self.active_terminal()
+            .is_some_and(|terminal| terminal.alternate_screen_mode())
+    }
+}
+
 impl EntityInputHandler for TerminalView {
     fn text_for_range(
         &mut self,
@@ -1257,8 +1286,10 @@ impl EntityInputHandler for TerminalView {
         _window: &mut Window,
         _cx: &mut Context<Self>,
     ) -> Option<String> {
-        let state = self.active_inline_input_state()?;
-        Some(state.text_for_range(range, adjusted_range))
+        if let Some(state) = self.active_inline_input_state() {
+            return Some(state.text_for_range(range, adjusted_range));
+        }
+        None
     }
 
     fn selected_text_range(
@@ -1267,8 +1298,13 @@ impl EntityInputHandler for TerminalView {
         _window: &mut Window,
         _cx: &mut Context<Self>,
     ) -> Option<UTF16Selection> {
-        let state = self.active_inline_input_state()?;
-        Some(state.selected_text_range())
+        if let Some(state) = self.active_inline_input_state() {
+            return Some(state.selected_text_range());
+        }
+        Some(UTF16Selection {
+            range: 0..0,
+            reversed: false,
+        })
     }
 
     fn marked_text_range(
@@ -1276,12 +1312,21 @@ impl EntityInputHandler for TerminalView {
         _window: &mut Window,
         _cx: &mut Context<Self>,
     ) -> Option<Range<usize>> {
-        let state = self.active_inline_input_state()?;
-        state.marked_text_range()
+        if let Some(state) = self.active_inline_input_state() {
+            return state.marked_text_range();
+        }
+        self.ime_marked_text_range_utf16()
     }
 
     fn unmark_text(&mut self, _window: &mut Window, cx: &mut Context<Self>) {
-        self.apply_inline_input_mutation(InlineInputState::unmark_text, cx);
+        if self.has_active_inline_input() {
+            self.apply_inline_input_mutation(InlineInputState::unmark_text, cx);
+            return;
+        }
+        // Only clear marked text; do NOT commit to PTY.
+        // Commit only happens in replace_text_in_range.
+        self.ime_marked_text = None;
+        cx.notify();
     }
 
     fn replace_text_in_range(
@@ -1291,21 +1336,46 @@ impl EntityInputHandler for TerminalView {
         _window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        self.apply_inline_input_mutation(move |state| state.replace_text_in_range(range, text), cx);
+        if self.has_active_inline_input() {
+            self.apply_inline_input_mutation(
+                move |state| state.replace_text_in_range(range, text),
+                cx,
+            );
+            return;
+        }
+        // Terminal IME mode: confirmed text → send to PTY
+        self.ime_marked_text = None;
+        if !text.is_empty() {
+            self.write_terminal_input(text.as_bytes(), cx);
+        }
+        self.clear_selection();
+        cx.notify();
     }
 
     fn replace_and_mark_text_in_range(
         &mut self,
         range: Option<Range<usize>>,
         new_text: &str,
-        new_selected_range: Option<Range<usize>>,
+        _new_selected_range: Option<Range<usize>>,
         _window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        self.apply_inline_input_mutation(
-            move |state| state.replace_and_mark_text_in_range(range, new_text, new_selected_range),
-            cx,
-        );
+        if self.has_active_inline_input() {
+            self.apply_inline_input_mutation(
+                move |state| {
+                    state.replace_and_mark_text_in_range(range, new_text, _new_selected_range)
+                },
+                cx,
+            );
+            return;
+        }
+        // Terminal IME mode: store composing text, do NOT send to PTY
+        self.ime_marked_text = if new_text.is_empty() {
+            None
+        } else {
+            Some(new_text.to_string())
+        };
+        cx.notify();
     }
 
     fn bounds_for_range(
@@ -1315,8 +1385,16 @@ impl EntityInputHandler for TerminalView {
         _window: &mut Window,
         _cx: &mut Context<Self>,
     ) -> Option<Bounds<Pixels>> {
-        let state = self.active_inline_input_state()?;
-        Some(state.bounds_for_range(range_utf16, element_bounds))
+        if let Some(state) = self.active_inline_input_state() {
+            return Some(state.bounds_for_range(range_utf16, element_bounds));
+        }
+        // Offset candidate window by preedit cursor position
+        let mut bounds = self.ime_cursor_bounds()?;
+        if let Some(pane) = self.active_pane_ref() {
+            let cell_width: f32 = pane.terminal.size().cell_width.into();
+            bounds.origin.x += px(range_utf16.start as f32 * cell_width);
+        }
+        Some(bounds)
     }
 
     fn character_index_for_point(
@@ -1325,12 +1403,14 @@ impl EntityInputHandler for TerminalView {
         _window: &mut Window,
         _cx: &mut Context<Self>,
     ) -> Option<usize> {
-        let state = self.active_inline_input_state()?;
-        Some(state.character_index_for_point(point))
+        if let Some(state) = self.active_inline_input_state() {
+            return Some(state.character_index_for_point(point));
+        }
+        None
     }
 
     fn accepts_text_input(&self, _window: &mut Window, _cx: &mut Context<Self>) -> bool {
-        self.has_active_inline_input()
+        true
     }
 }
 

@@ -4,6 +4,7 @@ use crate::ui::scrollbar::{self as ui_scrollbar, ScrollbarPaintStyle};
 use alacritty_terminal::grid::Dimensions;
 use alacritty_terminal::index::{Column, Line};
 use gpui::prelude::FluentBuilder;
+use gpui::{canvas, ElementInputHandler};
 use std::sync::Arc;
 
 fn cell_ranges_overlap(start_a: u32, end_a: u32, start_b: u32, end_b: u32) -> bool {
@@ -2330,6 +2331,21 @@ impl Render for TerminalView {
             .children(pane_resize_handles)
             .children(pane_focus_accents)
             .into_any_element();
+        let ime_focus_handle = self.focus_handle.clone();
+        let ime_view = cx.entity().clone();
+        let ime_input_layer = canvas(
+            move |_bounds, _window, _cx| {},
+            move |bounds, _, window, cx| {
+                window.handle_input(
+                    &ime_focus_handle,
+                    ElementInputHandler::new(bounds, ime_view.clone()),
+                    cx,
+                );
+            },
+        )
+        .absolute()
+        .size_full()
+        .into_any_element();
         let mut agent_sidebar_muted: gpui::Hsla = self.colors.foreground.into();
         agent_sidebar_muted.a = 0.72;
         let agent_sidebar = self.agent_sidebar_visible().then(|| {
@@ -2619,6 +2635,7 @@ impl Render for TerminalView {
                                     })
                                     .font_family(font_family.clone())
                                     .text_size(font_size)
+                                    .child(ime_input_layer)
                                     .child(terminal_grid_layer)
                                     .children(terminal_scrollbar_overlay),
                             )

@@ -235,13 +235,33 @@ impl TerminalView {
             }
         }
 
+        // Printable character input without modifiers is delegated to the
+        // platform IME / input handler so that CJK input methods work.
+        // Named special keys (enter, tab, space, etc.) and modifier
+        // combinations are still handled here via keystroke_to_input.
+        let is_printable_char = event.keystroke.key_char.is_some()
+            && !event.keystroke.modifiers.control
+            && !event.keystroke.modifiers.alt
+            && !event.keystroke.modifiers.platform
+            && !event.keystroke.modifiers.function
+            && !matches!(
+                key,
+                "enter" | "tab" | "space" | "backspace" | "escape" | "delete"
+            );
+
+        if is_printable_char {
+            // Let the event propagate to the platform IME handler which
+            // will call `replace_text_in_range` on our EntityInputHandler.
+            return;
+        }
+
         let prompt_shortcuts_enabled = !self
             .active_terminal()
             .is_some_and(|terminal| terminal.alternate_screen_mode());
         if let Some(input) = keystroke_to_input(&event.keystroke, prompt_shortcuts_enabled) {
             self.write_terminal_input(&input, cx);
             self.clear_selection();
-            // Request a redraw to show the typed character
+            cx.stop_propagation();
             cx.notify();
         }
     }

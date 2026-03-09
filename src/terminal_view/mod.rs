@@ -1144,6 +1144,8 @@ pub struct TerminalView {
     // AI input state
     ai_input_open: bool,
     ai_input: InlineInputState,
+    // IME composing state for terminal mode
+    ime_marked_text: Option<String>,
     // Pending clipboard write from OSC 52
     pending_clipboard: Option<String>,
     #[cfg(debug_assertions)]
@@ -2285,6 +2287,7 @@ impl TerminalView {
             search_debounce_token: 0,
             ai_input_open: false,
             ai_input: InlineInputState::new(String::new()),
+            ime_marked_text: None,
             pending_clipboard: None,
             #[cfg(debug_assertions)]
             render_metrics: TerminalRenderMetricsState::from_env(),
