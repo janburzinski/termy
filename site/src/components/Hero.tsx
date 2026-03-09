@@ -1,4 +1,4 @@
-import { Check, Copy, Plus, X } from "lucide-react";
+import { Plus, X } from "lucide-react";
 import { type JSX, useCallback, useEffect, useRef, useState } from "react";
 import { InteractiveTerminal } from "@/components/InteractiveTerminal";
 import { Button } from "@/components/ui/button";
