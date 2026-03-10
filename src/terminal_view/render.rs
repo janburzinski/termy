@@ -2331,16 +2331,19 @@ impl Render for TerminalView {
             .children(pane_resize_handles)
             .children(pane_focus_accents)
             .into_any_element();
+        let has_active_inline = self.has_active_inline_input();
         let ime_focus_handle = self.focus_handle.clone();
         let ime_view = cx.entity().clone();
         let ime_input_layer = canvas(
             move |_bounds, _window, _cx| {},
             move |bounds, _, window, cx| {
-                window.handle_input(
-                    &ime_focus_handle,
-                    ElementInputHandler::new(bounds, ime_view.clone()),
-                    cx,
-                );
+                if !has_active_inline {
+                    window.handle_input(
+                        &ime_focus_handle,
+                        ElementInputHandler::new(bounds, ime_view.clone()),
+                        cx,
+                    );
+                }
             },
         )
         .absolute()
