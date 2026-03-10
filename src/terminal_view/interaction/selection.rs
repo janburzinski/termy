@@ -12,6 +12,13 @@ fn is_hidden_or_spacer(flags: Flags) -> bool {
     flags.intersects(Flags::WIDE_CHAR_SPACER | Flags::LEADING_WIDE_CHAR_SPACER | Flags::HIDDEN)
 }
 
+/// Trailing spacer occupies the right half of a wide character on the same
+/// line.  Only this variant should trigger the "go back one column" fallback
+/// when a selection endpoint or double-click lands on it.
+fn is_trailing_wide_char_spacer(flags: Flags) -> bool {
+    flags.contains(Flags::WIDE_CHAR_SPACER) && !flags.contains(Flags::LEADING_WIDE_CHAR_SPACER)
+}
+
 fn terminal_line_bounds(
     grid: &alacritty_terminal::grid::Grid<alacritty_terminal::term::cell::Cell>,
 ) -> Option<(i32, i32)> {
@@ -30,7 +37,7 @@ fn grid_line_text(
     grid: &alacritty_terminal::grid::Grid<alacritty_terminal::term::cell::Cell>,
     line_idx: i32,
     cols: usize,
-) -> Option<Vec<char>> {
+) -> Option<Vec<Option<char>>> {
     use alacritty_terminal::index::{Column, Line};
 
     let (min_line, max_line) = terminal_line_bounds(grid)?;
@@ -39,17 +46,25 @@ fn grid_line_text(
     }
 
     let max_cols = cols.min(grid.columns());
-    let mut line = vec![' '; cols];
+    let mut line = vec![Some(' '); cols];
     let line_ref = &grid[Line(line_idx)];
     for col in 0..max_cols {
         let cell = &line_ref[Column(col)];
+        if is_trailing_wide_char_spacer(cell.flags) {
+            // Right half of a wide char — mark as None so it is filtered
+            // during copy and triggers the col-1 fallback for selection.
+            line[col] = None;
+            continue;
+        }
         if is_hidden_or_spacer(cell.flags) {
+            // Leading spacer (wide char wrapped to next line) or hidden
+            // cell — keep as space so it does not trigger col-1 fallback.
             continue;
         }
 
         let c = cell.c;
         if c != '\0' {
-            line[col] = if c.is_control() { ' ' } else { c };
+            line[col] = Some(if c.is_control() { ' ' } else { c });
         }
     }
     Some(line)
@@ -98,7 +113,7 @@ fn selected_text_from_terminal(
                 continue;
             };
 
-            let col_start = if line_idx == selection_start.line {
+            let mut col_start = if line_idx == selection_start.line {
                 selection_start.col
             } else {
                 0
@@ -108,12 +123,18 @@ fn selected_text_from_terminal(
             } else {
                 cols.saturating_sub(1)
             };
+            // If col_start falls on a wide char spacer, move back to the
+            // actual character so it is included in the copied text.
+            if col_start > 0 && line.get(col_start) == Some(&None) {
+                col_start -= 1;
+            }
             if col_start > col_end {
                 continue;
             }
 
             let rendered = line[col_start..=col_end]
                 .iter()
+                .filter_map(|c| *c)
                 .collect::<String>()
                 .trim_end()
                 .to_string();
@@ -128,8 +149,8 @@ fn selected_text_from_terminal(
     }
 }
 
-fn row_text_from_terminal(terminal: &Terminal, row: usize, cols: usize) -> Vec<char> {
-    let mut line = vec![' '; cols];
+fn row_text_from_terminal(terminal: &Terminal, row: usize, cols: usize) -> Vec<Option<char>> {
+    let mut line = vec![Some(' '); cols];
     let _ = terminal.for_each_renderable_cell(|display_offset, term_line, col, cell| {
         let Some(cell_row) = TerminalView::viewport_row_from_term_line(term_line, display_offset)
         else {
@@ -139,13 +160,17 @@ fn row_text_from_terminal(terminal: &Terminal, row: usize, cols: usize) -> Vec<c
             return;
         }
 
+        if is_trailing_wide_char_spacer(cell.flags) {
+            line[col] = None;
+            return;
+        }
         if is_hidden_or_spacer(cell.flags) {
             return;
         }
 
         let c = cell.c;
         if c != '\0' {
-            line[col] = if c.is_control() { ' ' } else { c };
+            line[col] = Some(if c.is_control() { ' ' } else { c });
         }
     });
     line
@@ -402,8 +427,7 @@ impl TerminalView {
         }
 
         let line = row_text_from_terminal(terminal, row, cols);
-
-        Some(line)
+        Some(line.into_iter().map(|c| c.unwrap_or(' ')).collect())
     }
 
     fn terminal_selection_char_class(c: char) -> TerminalSelectionCharClass {
@@ -417,9 +441,16 @@ impl TerminalView {
     }
 
     pub(in super::super) fn select_token_at_cell(&mut self, cell: CellPos) -> bool {
-        let Some(line) = self.row_text(cell.row) else {
+        let Some(terminal) = self.active_terminal() else {
             return false;
         };
+        let size = terminal.size();
+        let cols = size.cols as usize;
+        let rows = size.rows as usize;
+        if cols == 0 || cell.row >= rows {
+            return false;
+        }
+        let line = row_text_from_terminal(terminal, cell.row, cols);
         let Some(term_pos) = self.selection_pos_for_cell(cell) else {
             return false;
         };
@@ -427,9 +458,21 @@ impl TerminalView {
             return false;
         }
 
-        let class = Self::terminal_selection_char_class(line[cell.col]);
+        // If the click lands on a wide char spacer, use the actual character.
+        let effective_col = if line[cell.col].is_none() && cell.col > 0 {
+            cell.col - 1
+        } else {
+            cell.col
+        };
+        let Some(effective_char) = line[effective_col] else {
+            return false;
+        };
+        let class = Self::terminal_selection_char_class(effective_char);
         if class == TerminalSelectionCharClass::Whitespace {
-            let Some(last_non_whitespace) = line.iter().rposition(|c| !c.is_whitespace()) else {
+            let Some(last_non_whitespace) = line
+                .iter()
+                .rposition(|c| c.is_some_and(|ch| !ch.is_whitespace()))
+            else {
                 return false;
             };
             if cell.col > last_non_whitespace {
@@ -437,15 +480,39 @@ impl TerminalView {
             }
         }
 
-        let mut start_col = cell.col;
-        while start_col > 0 && Self::terminal_selection_char_class(line[start_col - 1]) == class {
-            start_col -= 1;
+        let mut start_col = effective_col;
+        while start_col > 0 {
+            match line[start_col - 1] {
+                // Spacer: only cross it if the real char beyond it is the same class.
+                None if start_col >= 2
+                    && line[start_col - 2]
+                        .is_some_and(|c| Self::terminal_selection_char_class(c) == class) =>
+                {
+                    start_col -= 1
+                }
+                Some(c) if Self::terminal_selection_char_class(c) == class => start_col -= 1,
+                _ => break,
+            }
         }
 
-        let mut end_col = cell.col;
-        while end_col + 1 < line.len()
-            && Self::terminal_selection_char_class(line[end_col + 1]) == class
-        {
+        let mut end_col = effective_col;
+        while end_col + 1 < line.len() {
+            match line[end_col + 1] {
+                // Spacer: only cross it if the real char beyond it is the same class.
+                None if end_col + 2 < line.len()
+                    && line[end_col + 2]
+                        .is_some_and(|c| Self::terminal_selection_char_class(c) == class) =>
+                {
+                    end_col += 1
+                }
+                Some(c) if Self::terminal_selection_char_class(c) == class => end_col += 1,
+                _ => break,
+            }
+        }
+
+        // Include the trailing spacer of the last wide char so the
+        // selection highlight covers both cells of the glyph.
+        if end_col + 1 < line.len() && line[end_col + 1].is_none() {
             end_col += 1;
         }
 
@@ -573,7 +640,12 @@ mod tests {
                 let Some(chars) = grid_line_text(grid, line_idx, cols) else {
                     continue;
                 };
-                let rendered = chars.iter().collect::<String>().trim_end().to_string();
+                let rendered = chars
+                    .iter()
+                    .filter_map(|c| *c)
+                    .collect::<String>()
+                    .trim_end()
+                    .to_string();
                 if !rendered.is_empty() {
                     lines.push((line_idx, rendered));
                 }
@@ -652,7 +724,11 @@ mod tests {
         tmux.feed_output(b"row-adapter\r\n");
         let tmux_row = row_text_from_terminal(&tmux, 0, usize::from(size.cols));
         assert_eq!(tmux_row.len(), usize::from(size.cols));
-        assert!(tmux_row.iter().any(|c| !c.is_whitespace()));
+        assert!(
+            tmux_row
+                .iter()
+                .any(|c| c.is_some_and(|ch| !ch.is_whitespace()))
+        );
 
         let native = Terminal::new_native(size, None, None, None, None)
             .expect("native terminal should initialize for row adapter test");
@@ -660,7 +736,7 @@ mod tests {
         let expected_native_token = "native-row";
         let mut native_row = row_text_from_terminal(&native, 0, usize::from(size.cols));
         for _ in 0..40 {
-            let rendered_native_row: String = native_row.iter().collect();
+            let rendered_native_row: String = native_row.iter().filter_map(|c| *c).collect();
             if rendered_native_row.contains(expected_native_token) {
                 break;
             }
@@ -669,8 +745,185 @@ mod tests {
             native_row = row_text_from_terminal(&native, 0, usize::from(size.cols));
         }
         assert_eq!(native_row.len(), usize::from(size.cols));
-        let rendered_native_row: String = native_row.iter().collect();
+        let rendered_native_row: String = native_row.iter().filter_map(|c| *c).collect();
         assert!(rendered_native_row.contains(expected_native_token));
+    }
+
+    #[test]
+    fn row_text_from_terminal_marks_wide_char_spacers_correctly() {
+        let size = TerminalSize {
+            cols: 10,
+            rows: 3,
+            ..TerminalSize::default()
+        };
+        let terminal = Terminal::new_tmux(
+            size,
+            TerminalOptions {
+                scrollback_history: 128,
+                ..TerminalOptions::default()
+            },
+        );
+        // "ls 文件" — col layout: l s   文 _ 件 _  (where _ = spacer)
+        terminal.feed_output("ls 文件".as_bytes());
+        let row = row_text_from_terminal(&terminal, 0, usize::from(size.cols));
+
+        assert_eq!(row[0], Some('l'));
+        assert_eq!(row[1], Some('s'));
+        assert_eq!(row[2], Some(' '));
+        assert_eq!(row[3], Some('文'));
+        assert_eq!(row[4], None, "trailing spacer should be None");
+        assert_eq!(row[5], Some('件'));
+        assert_eq!(row[6], None, "trailing spacer should be None");
+    }
+
+    #[test]
+    fn row_text_from_terminal_leading_spacer_is_not_none() {
+        // Narrow terminal forces wide char to wrap, producing a leading spacer.
+        let size = TerminalSize {
+            cols: 5,
+            rows: 3,
+            ..TerminalSize::default()
+        };
+        let terminal = Terminal::new_tmux(
+            size,
+            TerminalOptions {
+                scrollback_history: 128,
+                ..TerminalOptions::default()
+            },
+        );
+        // "src/文" — 4 ASCII chars fill cols 0-3, '文' needs 2 cols but
+        // only 1 remains; it wraps to the next line.
+        // Line 0 col 4: LEADING_WIDE_CHAR_SPACER
+        // Line 1 col 0: '文', col 1: trailing spacer
+        terminal.feed_output("src/文".as_bytes());
+        let row0 = row_text_from_terminal(&terminal, 0, usize::from(size.cols));
+        assert_eq!(
+            row0[4],
+            Some(' '),
+            "leading spacer should be Some(' '), not None"
+        );
+
+        let row1 = row_text_from_terminal(&terminal, 1, usize::from(size.cols));
+        assert_eq!(row1[0], Some('文'));
+        assert_eq!(row1[1], None, "trailing spacer should be None");
+    }
+
+    #[test]
+    fn grid_line_text_marks_trailing_wide_char_spacer_as_none() {
+        let size = TerminalSize {
+            cols: 10,
+            rows: 3,
+            ..TerminalSize::default()
+        };
+        let terminal = Terminal::new_tmux(
+            size,
+            TerminalOptions {
+                scrollback_history: 128,
+                ..TerminalOptions::default()
+            },
+        );
+        // "你好" — each char occupies 2 cells: char + trailing spacer.
+        terminal.feed_output("你好".as_bytes());
+
+        let line = terminal
+            .with_grid(|grid| grid_line_text(grid, 0, 10))
+            .flatten()
+            .expect("line 0 should exist");
+
+        assert_eq!(line[0], Some('你'));
+        assert_eq!(line[1], None, "trailing spacer should be None");
+        assert_eq!(line[2], Some('好'));
+        assert_eq!(line[3], None, "trailing spacer should be None");
+    }
+
+    #[test]
+    fn leading_wide_char_spacer_preserved_as_space() {
+        // Use a narrow terminal so a wide char at the end wraps to the next line.
+        let size = TerminalSize {
+            cols: 5,
+            rows: 3,
+            ..TerminalSize::default()
+        };
+        let terminal = Terminal::new_tmux(
+            size,
+            TerminalOptions {
+                scrollback_history: 128,
+                ..TerminalOptions::default()
+            },
+        );
+        // "src/文" — 4 ASCII chars fill cols 0-3, '文' needs 2 cols but
+        // only 1 remains; it wraps to the next line.
+        // Line 0 col 4: LEADING_WIDE_CHAR_SPACER (should stay Some(' '))
+        // Line 1 col 0: '文', col 1: trailing spacer (None)
+        terminal.feed_output("src/文".as_bytes());
+
+        let line0 = terminal
+            .with_grid(|grid| grid_line_text(grid, 0, 5))
+            .flatten()
+            .expect("line 0");
+        assert_eq!(
+            line0[4],
+            Some(' '),
+            "leading spacer should be Some(' '), not None"
+        );
+
+        let line1 = terminal
+            .with_grid(|grid| grid_line_text(grid, 1, 5))
+            .flatten()
+            .expect("line 1");
+        assert_eq!(line1[0], Some('文'));
+        assert_eq!(line1[1], None, "trailing spacer should be None");
+    }
+
+    #[test]
+    fn selected_text_includes_wide_char_when_start_on_spacer() {
+        let size = TerminalSize {
+            cols: 10,
+            rows: 3,
+            ..TerminalSize::default()
+        };
+        let terminal = Terminal::new_tmux(
+            size,
+            TerminalOptions {
+                scrollback_history: 128,
+                ..TerminalOptions::default()
+            },
+        );
+        // "cd 桌面" layout:
+        //   col 0:'c' 1:'d' 2:' ' 3:'桌' 4:spacer 5:'面' 6:spacer
+        terminal.feed_output("cd 桌面".as_bytes());
+
+        // Selection starting on the spacer of '桌' (col 4) should fall back to col 3.
+        let start = SelectionPos { col: 4, line: 0 };
+        let end = SelectionPos { col: 6, line: 0 };
+        let text =
+            selected_text_from_terminal(&terminal, start, end).expect("selection should resolve");
+        assert_eq!(text, "桌面");
+    }
+
+    #[test]
+    fn selected_text_with_wide_chars_has_no_extra_spaces() {
+        let size = TerminalSize {
+            cols: 16,
+            rows: 3,
+            ..TerminalSize::default()
+        };
+        let terminal = Terminal::new_tmux(
+            size,
+            TerminalOptions {
+                scrollback_history: 128,
+                ..TerminalOptions::default()
+            },
+        );
+        terminal.feed_output("git 提交记录".as_bytes());
+
+        // Select the entire line — copied text should have no extra spaces
+        // from wide char spacers.
+        let start = SelectionPos { col: 0, line: 0 };
+        let end = SelectionPos { col: 15, line: 0 };
+        let text =
+            selected_text_from_terminal(&terminal, start, end).expect("selection should resolve");
+        assert_eq!(text, "git 提交记录");
     }
 
     #[test]
