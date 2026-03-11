@@ -24,6 +24,7 @@ Detailed API references:
 Reference implementation:
 
 - `crates/plugin_example_status`
+- `examples/plugin-full`
 
 ## Rust plugin quickstart
 

@@ -1,0 +1,61 @@
+name: Plugin Full Example
+
+on:
+  pull_request:
+    paths:
+      - "examples/plugin-full/**"
+      - "crates/plugin_core/**"
+      - "crates/plugin_sdk/**"
+      - ".github/workflows/plugin-full-example.yml"
+  push:
+    branches: [main]
+    paths:
+      - "examples/plugin-full/**"
+      - "crates/plugin_core/**"
+      - "crates/plugin_sdk/**"
+      - ".github/workflows/plugin-full-example.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-example:
+    name: Build standalone plugin example
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-unknown-linux-gnu
+
+      - name: Cache Rust
+        uses: Swatinem/rust-cache@v2
+
+      - name: Test plugin example
+        run: cargo test --manifest-path examples/plugin-full/Cargo.toml -q
+
+      - name: Build plugin example
+        run: cargo build --manifest-path examples/plugin-full/Cargo.toml --release --target x86_64-unknown-linux-gnu
+
+      - name: Package plugin example artifact
+        shell: bash
+        run: |
+          set -euo pipefail
+          artifact_root="target/plugin-full-example/example.full"
+          mkdir -p "$artifact_root"
+          cp examples/plugin-full/termy-plugin.json "$artifact_root/"
+          cp examples/plugin-full/README.md "$artifact_root/"
+          cp target/x86_64-unknown-linux-gnu/release/plugin-full "$artifact_root/"
+          tar -C target/plugin-full-example -czf target/dist/plugin-full-linux-x86_64.tar.gz example.full
+
+      - name: Upload plugin example artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: plugin-full-linux-x86_64
+          path: target/dist/plugin-full-linux-x86_64.tar.gz
+          if-no-files-found: error

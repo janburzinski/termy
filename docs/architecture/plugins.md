@@ -208,6 +208,8 @@ cargo run -p termy_cli -- -plugin-init
 
 A dedicated Rust reference plugin also lives in `crates/plugin_example_status/`.
 
+A standalone installable example plugin lives in `examples/plugin-full/` and is packaged by CI as an artifact.
+
 ## Settings integration
 
 The Settings `Plugins` tab currently supports:
