@@ -29,7 +29,7 @@ Create a plugin directory and copy the manifest plus built binary:
 ```bash
 mkdir -p ~/.config/termy/plugins/example.full
 cp examples/plugin-full/termy-plugin.json ~/.config/termy/plugins/example.full/
-cp target/release/plugin-full ~/.config/termy/plugins/example.full/
+cp examples/plugin-full/target/release/plugin-full ~/.config/termy/plugins/example.full/
 ```
 
 Then open `Settings -> Plugins` in Termy and start `Full Example Plugin`.

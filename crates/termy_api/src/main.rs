@@ -164,7 +164,10 @@ fn build_router(state: AppState) -> Router {
         .route("/plugins/me", get(list_my_plugins))
         .route("/plugins", get(list_plugins).post(create_plugin))
         .route("/plugins/{slug}", axum::routing::patch(update_plugin))
-        .route("/plugins/{slug}/versions", get(list_plugin_versions).post(publish_plugin_version))
+        .route(
+            "/plugins/{slug}/versions",
+            get(list_plugin_versions).post(publish_plugin_version),
+        )
         .route("/themes/me", get(list_my_themes))
         .route("/themes", get(list_themes).post(create_theme))
         .route("/themes/{slug}", get(get_theme).patch(update_theme))
@@ -906,9 +909,17 @@ async fn update_plugin(
         "#,
     )
     .bind(next_name)
-    .bind(request.description.unwrap_or_else(|| current_plugin.description.clone()))
+    .bind(
+        request
+            .description
+            .unwrap_or_else(|| current_plugin.description.clone()),
+    )
     .bind(request.is_public.unwrap_or(current_plugin.is_public()))
-    .bind(request.repository_url.or(current_plugin.repository_url.clone()))
+    .bind(
+        request
+            .repository_url
+            .or(current_plugin.repository_url.clone()),
+    )
     .bind(request.homepage_url.or(current_plugin.homepage_url.clone()))
     .bind(request.license.or(current_plugin.license.clone()))
     .bind(request.author_name.or(current_plugin.author_name.clone()))
@@ -1031,13 +1042,11 @@ async fn publish_plugin_version(
     .execute(&mut *transaction)
     .await?;
 
-    sqlx::query(
-        "UPDATE plugin SET latest_version = $1, updated_at = NOW() WHERE id = $2",
-    )
-    .bind(&normalized_version)
-    .bind(plugin.id)
-    .execute(&mut *transaction)
-    .await?;
+    sqlx::query("UPDATE plugin SET latest_version = $1, updated_at = NOW() WHERE id = $2")
+        .bind(&normalized_version)
+        .bind(plugin.id)
+        .execute(&mut *transaction)
+        .await?;
 
     transaction.commit().await?;
 
@@ -1077,10 +1086,7 @@ async fn publish_plugin_version(
     ))
 }
 
-async fn fetch_plugin_by_slug(
-    pool: &PgPool,
-    slug: &str,
-) -> Result<PluginRegistryEntry, ApiError> {
+async fn fetch_plugin_by_slug(pool: &PgPool, slug: &str) -> Result<PluginRegistryEntry, ApiError> {
     let plugin = sqlx::query_as::<_, PluginRegistryEntry>(
         r#"
         SELECT
@@ -1838,7 +1844,9 @@ fn ensure_plugin_owner(plugin: &PluginRegistryEntry, user: &AuthUser) -> Result<
     if owner_matches {
         Ok(())
     } else {
-        Err(ApiError::Forbidden("you do not own this plugin".to_string()))
+        Err(ApiError::Forbidden(
+            "you do not own this plugin".to_string(),
+        ))
     }
 }
 

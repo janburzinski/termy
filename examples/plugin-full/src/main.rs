@@ -134,7 +134,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
             HostRpcMessage::InvokeCommand(invocation) => {
                 session.send_log(
-                    PluginLogLevel::Warning,
+                    PluginLogLevel::Warn,
                     format!("unhandled command `{}`", invocation.command_id),
                 )?;
             }
