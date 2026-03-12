@@ -1721,43 +1721,38 @@ impl TerminalView {
     }
 
     fn effective_terminal_padding(&self) -> (f32, f32) {
-        if self
-            .active_terminal()
-            .is_some_and(|terminal| terminal.alternate_screen_mode())
-        {
-            (0.0, 0.0)
-        } else if self
-            .tabs
-            .get(self.active_tab)
-            .is_some_and(|tab| tab.panes.len() > 1)
-        {
+        if Self::uses_outer_terminal_padding(
+            self.tabs
+                .get(self.active_tab)
+                .map_or(0, |tab| tab.panes.len()),
+        ) {
+            (self.padding_x, self.padding_y)
+        } else {
             // Multi-pane layouts use per-pane content padding (native) or pane-managed
             // geometry (tmux), so disable global outer padding in that mode.
             (0.0, 0.0)
-        } else {
-            (self.padding_x, self.padding_y)
         }
     }
 
     fn native_split_content_padding(&self) -> (f32, f32) {
-        if self.runtime_uses_tmux() {
-            return (0.0, 0.0);
-        }
-        if self
-            .active_terminal()
-            .is_some_and(|terminal| terminal.alternate_screen_mode())
-        {
-            return (0.0, 0.0);
-        }
-        if self
-            .tabs
-            .get(self.active_tab)
-            .is_some_and(|tab| tab.panes.len() > 1)
-        {
+        if Self::uses_native_split_content_padding(
+            self.runtime_uses_tmux(),
+            self.tabs
+                .get(self.active_tab)
+                .map_or(0, |tab| tab.panes.len()),
+        ) {
             (self.padding_x, self.padding_y)
         } else {
             (0.0, 0.0)
         }
+    }
+
+    fn uses_outer_terminal_padding(pane_count: usize) -> bool {
+        pane_count <= 1
+    }
+
+    fn uses_native_split_content_padding(runtime_uses_tmux: bool, pane_count: usize) -> bool {
+        !runtime_uses_tmux && pane_count > 1
     }
 
     fn overlay_style(&self) -> OverlayStyleBuilder<'_> {
@@ -3242,5 +3237,20 @@ mod tests {
         );
 
         assert_eq!(resolved.appearance, WindowBackgroundAppearance::Transparent);
+    }
+
+    #[test]
+    fn single_pane_layout_keeps_outer_terminal_padding() {
+        assert!(TerminalView::uses_outer_terminal_padding(0));
+        assert!(TerminalView::uses_outer_terminal_padding(1));
+        assert!(!TerminalView::uses_outer_terminal_padding(2));
+    }
+
+    #[test]
+    fn native_split_content_padding_is_only_used_for_native_multi_pane_tabs() {
+        assert!(!TerminalView::uses_native_split_content_padding(false, 0));
+        assert!(!TerminalView::uses_native_split_content_padding(false, 1));
+        assert!(TerminalView::uses_native_split_content_padding(false, 2));
+        assert!(!TerminalView::uses_native_split_content_padding(true, 2));
     }
 }
