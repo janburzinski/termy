@@ -151,6 +151,8 @@ const SEARCH_BUTTON_TEXT_ALPHA: f32 = 0.70;
 const SEARCH_BUTTON_HOVER_BG_ALPHA: f32 = 0.20;
 const SEARCH_INPUT_SELECTION_ALPHA: f32 = 0.30;
 const TAB_SWITCH_HINT_ANIMATION_FRAME_MS: u64 = 16;
+const NEW_TAB_ANIMATION_DURATION: Duration = Duration::from_millis(180);
+const NEW_TAB_ANIMATION_FRAME_MS: u64 = 16;
 const MAX_PANE_FOCUS_STRENGTH: f32 = 2.0;
 const NATIVE_PANE_MIN_COLS: u16 = 24;
 const NATIVE_PANE_MIN_ROWS: u16 = 8;
@@ -1082,6 +1084,10 @@ pub struct TerminalView {
     vertical_tabs: bool,
     vertical_tabs_width: f32,
     vertical_tabs_minimized: bool,
+    auto_hide_tabbar: bool,
+    new_tab_animation_tab_id: Option<TabId>,
+    new_tab_animation_start: Option<Instant>,
+    new_tab_animation_scheduled: bool,
     show_termy_in_titlebar: bool,
     tab_shell_integration: TabTitleShellIntegration,
     configured_working_dir: Option<String>,
@@ -1622,6 +1628,57 @@ impl TerminalView {
         .detach();
     }
 
+    pub(crate) fn start_new_tab_animation(&mut self, tab_id: TabId, cx: &mut Context<Self>) {
+        self.new_tab_animation_tab_id = Some(tab_id);
+        self.new_tab_animation_start = Some(Instant::now());
+        self.new_tab_animation_scheduled = false;
+        self.schedule_new_tab_animation(cx);
+    }
+
+    fn schedule_new_tab_animation(&mut self, cx: &mut Context<Self>) {
+        if self.new_tab_animation_scheduled {
+            return;
+        }
+        self.new_tab_animation_scheduled = true;
+        cx.spawn(async move |this: WeakEntity<Self>, cx: &mut AsyncApp| {
+            smol::Timer::after(Duration::from_millis(NEW_TAB_ANIMATION_FRAME_MS)).await;
+            let _ = cx.update(|cx| {
+                this.update(cx, |view, cx| {
+                    view.new_tab_animation_scheduled = false;
+                    let still_animating = view
+                        .new_tab_animation_start
+                        .map(|start| {
+                            Instant::now().saturating_duration_since(start)
+                                < NEW_TAB_ANIMATION_DURATION
+                        })
+                        .unwrap_or(false);
+                    if still_animating {
+                        view.schedule_new_tab_animation(cx);
+                    } else {
+                        view.new_tab_animation_tab_id = None;
+                        view.new_tab_animation_start = None;
+                    }
+                    cx.notify();
+                })
+            });
+        })
+        .detach();
+    }
+
+    pub(crate) fn new_tab_animation_progress(&self, now: Instant) -> Option<(usize, f32)> {
+        let tab_id = self.new_tab_animation_tab_id?;
+        let start = self.new_tab_animation_start?;
+        let elapsed = now.saturating_duration_since(start).as_secs_f32();
+        let total = NEW_TAB_ANIMATION_DURATION.as_secs_f32();
+        if elapsed >= total {
+            return None;
+        }
+        let raw = (elapsed / total).clamp(0.0, 1.0);
+        let progress = 1.0 - (1.0 - raw).powi(3); // ease_out_cubic
+        let index = self.tabs.iter().position(|t| t.id == tab_id)?;
+        Some((index, progress))
+    }
+
     fn pane_focus_config(&self) -> Option<(PaneFocusPreset, f32)> {
         let preset = pane_focus_preset(self.pane_focus_effect)?;
         let strength = pane_focus_strength_factor(self.pane_focus_strength);
@@ -2147,6 +2204,10 @@ impl TerminalView {
                 .vertical_tabs_width
                 .clamp(VERTICAL_TAB_STRIP_MIN_WIDTH, VERTICAL_TAB_STRIP_MAX_WIDTH),
             vertical_tabs_minimized: config.vertical_tabs_minimized,
+            auto_hide_tabbar: config.auto_hide_tabbar,
+            new_tab_animation_tab_id: None,
+            new_tab_animation_start: None,
+            new_tab_animation_scheduled: false,
             show_termy_in_titlebar: config.show_termy_in_titlebar,
             tab_shell_integration,
             configured_working_dir,
@@ -2405,6 +2466,7 @@ impl TerminalView {
         self.vertical_tabs = config.vertical_tabs;
         self.vertical_tabs_width = vertical_tabs_width;
         self.vertical_tabs_minimized = config.vertical_tabs_minimized;
+        self.auto_hide_tabbar = config.auto_hide_tabbar;
         self.show_termy_in_titlebar = config.show_termy_in_titlebar;
         self.show_debug_overlay = config.show_debug_overlay;
         self.tab_shell_integration = TabTitleShellIntegration {

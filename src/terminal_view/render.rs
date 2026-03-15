@@ -2425,7 +2425,9 @@ impl Render for TerminalView {
         let focus_handle = self.focus_handle.clone();
         let titlebar_height = Self::titlebar_height();
         let tabbar_bg = terminal_surface_bg;
-        let tabs_row = (!self.vertical_tabs)
+        let show_tabbar = !self.vertical_tabs
+            && !(self.auto_hide_tabbar && self.tabs.len() <= 1);
+        let tabs_row = show_tabbar
             .then(|| self.render_tab_strip(window, &colors, &font_family, tabbar_bg, cx));
         let vertical_tab_strip = self
             .vertical_tabs

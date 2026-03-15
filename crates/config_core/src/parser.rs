@@ -464,6 +464,13 @@ impl AppConfig {
                         config.vertical_tabs_minimized = parsed;
                     }
                 }
+                RootSettingId::AutoHideTabbar => {
+                    if let Some(parsed) =
+                        parse_bool_field(&mut diagnostics, line_number, key, value)
+                    {
+                        config.auto_hide_tabbar = parsed;
+                    }
+                }
                 RootSettingId::ShowTermyInTitlebar => {
                     if let Some(parsed) =
                         parse_bool_field(&mut diagnostics, line_number, key, value)

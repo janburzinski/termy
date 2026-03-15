@@ -195,6 +195,8 @@ struct TabItemRenderInput {
     show_tab_close: bool,
     close_slot_width: f32,
     drop_marker_side: Option<TabDropMarkerSide>,
+    /// 0.0..=1.0 progress for new-tab open animation, None when not animating
+    open_anim_progress: Option<f32>,
 }
 
 impl TerminalView {
@@ -419,7 +421,11 @@ impl TerminalView {
             Self::tab_strip_layout_for_viewport_with_left_inset(viewport_width, left_inset_width);
         self.set_tab_strip_layout_snapshot(layout);
 
-        let geometry = layout.geometry;
+        let mut geometry = layout.geometry;
+        geometry.tabs_viewport_width += geometry.action_rail_width;
+        geometry.gutter_start_x += geometry.action_rail_width;
+        geometry.action_rail_start_x += geometry.action_rail_width;
+        geometry.action_rail_width = 0.0;
         let tab_strip_viewport_width = geometry.tabs_viewport_width;
         let widths_changed =
             self.sync_tab_display_widths_for_viewport_if_needed(tab_strip_viewport_width);
@@ -629,27 +635,33 @@ impl TerminalView {
         let hover_tab_index = input.index;
         let close_tab_index = input.index;
 
-        let rename_text_color = if input.is_active {
+        let anim = input.open_anim_progress.unwrap_or(1.0);
+
+        let mut rename_text_color = if input.is_active {
             palette.active_tab_text
         } else {
             palette.inactive_tab_text
         };
+        rename_text_color.a *= anim;
         let mut rename_selection_color = colors.cursor;
         rename_selection_color.a = if input.is_active { 0.34 } else { 0.24 };
+        rename_selection_color.a *= anim;
 
-        let tab_bg = if input.is_active {
+        let mut tab_bg = if input.is_active {
             palette.active_tab_bg
         } else if input.is_hovered {
             palette.hovered_tab_bg
         } else {
             palette.inactive_tab_bg
         };
+        tab_bg.a *= anim;
 
         let mut close_text_color = if input.is_active {
             palette.active_tab_text
         } else {
             palette.inactive_tab_text
         };
+        close_text_color.a *= anim;
         if !input.show_tab_close {
             close_text_color.a = 0.0;
         }
@@ -715,6 +727,7 @@ impl TerminalView {
         let tab_shell = div()
             .flex_none()
             .relative()
+            .overflow_x_hidden()
             .bg(tab_bg)
             .w(px(input.tab_width))
             .h(px(TAB_ITEM_HEIGHT))
@@ -820,6 +833,7 @@ impl TerminalView {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let now = Instant::now();
+        let new_tab_anim = self.new_tab_animation_progress(now);
         let mut tabs_scroll_content = div()
             .id("tabs-scroll-content")
             .flex_none()
@@ -843,9 +857,17 @@ impl TerminalView {
         );
 
         for index in 0..self.tabs.len() {
-            let (tab_width, tab_title) = {
+            let (display_width, tab_title) = {
                 let tab = &self.tabs[index];
                 (tab.display_width, tab.title.clone())
+            };
+            let anim_progress = new_tab_anim
+                .filter(|(anim_index, _)| *anim_index == index)
+                .map(|(_, p)| p);
+            let tab_width = if let Some(p) = anim_progress {
+                display_width * p
+            } else {
+                display_width
             };
             let is_active = index == self.active_tab;
             let is_hovered = self.tab_strip.hovered_tab == Some(index);
@@ -894,6 +916,7 @@ impl TerminalView {
                     show_tab_close,
                     close_slot_width,
                     drop_marker_side: self.tab_drop_marker_side(index),
+                    open_anim_progress: anim_progress,
                 },
                 font_family,
                 colors,
@@ -986,7 +1009,6 @@ impl TerminalView {
             (state.geometry.button_start_y - TOP_STRIP_CONTENT_OFFSET_Y).max(0.0);
         let tabbar_new_tab_size =
             (state.geometry.button_end_x - state.geometry.button_start_x).max(0.0);
-        let tab_baseline_y = state.chrome_layout.baseline_y;
 
         div()
             .id("tabbar-action-rail")
@@ -1014,15 +1036,7 @@ impl TerminalView {
                         cx,
                     )),
             )
-            .child(
-                div()
-                    .absolute()
-                    .left_0()
-                    .right_0()
-                    .top(px(tab_baseline_y))
-                    .h(px(TAB_STROKE_THICKNESS))
-                    .bg(palette.tab_stroke_color),
-            )
+            // baseline stroke intentionally omitted (new tab button removed)
             .into_any_element()
     }
 
@@ -1057,7 +1071,7 @@ impl TerminalView {
             palette.tabbar_new_tab_hover_border,
             palette.tabbar_new_tab_text,
             palette.tabbar_new_tab_hover_text,
-            TABBAR_NEW_TAB_BUTTON_SIZE,
+            0.0,
             cx,
         );
         let collapse_icon = if compact { "›" } else { "‹" };

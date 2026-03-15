@@ -294,6 +294,7 @@ impl TerminalView {
                 self.scroll_active_tab_into_view();
                 self.schedule_persist_native_workspace();
                 self.emit_active_tab_changed_plugin_event();
+                self.start_new_tab_animation(tab_id, cx);
                 cx.notify();
             }
         }
