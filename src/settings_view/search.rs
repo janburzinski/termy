@@ -136,27 +136,12 @@ static SETTINGS_METADATA: LazyLock<Vec<SettingMetadata>> = LazyLock::new(|| {
     }));
 
     entries.push(SettingMetadata {
-        key: "experimental",
-        section: SettingsSection::Experimental,
-        title: "Experimental",
-        description: "Track workspace crates and features that are still considered experimental.",
-        keywords: &["experimental", "preview", "beta", "unstable", "crate"],
-    });
-    entries.push(SettingMetadata {
         key: "theme_store",
         section: SettingsSection::ThemeStore,
         title: "Theme Store",
         description: "Browse and install community themes from the online store.",
         keywords: &["theme", "store", "install", "colors"],
     });
-    entries.push(SettingMetadata {
-        key: "plugins",
-        section: SettingsSection::Plugins,
-        title: "Plugins",
-        description: "Inspect installed plugins, permissions, startup state, and failures.",
-        keywords: &["plugins", "extensions", "permissions", "autostart"],
-    });
-
     entries
 });
 
@@ -171,34 +156,12 @@ pub(super) struct SearchableSetting {
 }
 
 impl SettingsWindow {
-    fn is_plugins_section_enabled(&self) -> bool {
-        self.config.show_plugins_tab
-    }
-
-    fn is_experimental_section_enabled() -> bool {
-        crate::experimental::has_entries()
-    }
-
-    fn is_section_visible(
-        section: SettingsSection,
-        plugins_enabled: bool,
-        experimental_enabled: bool,
-    ) -> bool {
-        match section {
-            SettingsSection::Plugins => plugins_enabled,
-            SettingsSection::Experimental => experimental_enabled,
-            _ => true,
-        }
-    }
-
     pub(super) fn settings_section_label(section: SettingsSection) -> &'static str {
         match section {
             SettingsSection::Appearance => "Appearance",
             SettingsSection::Terminal => "Terminal",
             SettingsSection::Tabs => "Tabs",
-            SettingsSection::Experimental => "Experimental",
             SettingsSection::ThemeStore => "Theme Store",
-            SettingsSection::Plugins => "Plugins",
             SettingsSection::Advanced => "Advanced",
             SettingsSection::Colors => "Colors",
             SettingsSection::Keybindings => "Keybindings",
@@ -206,22 +169,15 @@ impl SettingsWindow {
     }
 
     pub(super) fn settings_sections_in_order(&self) -> Vec<SettingsSection> {
-        let plugins_enabled = self.is_plugins_section_enabled();
-        let experimental_enabled = Self::is_experimental_section_enabled();
-        [
+        vec![
             SettingsSection::Appearance,
             SettingsSection::Terminal,
             SettingsSection::Tabs,
-            SettingsSection::Experimental,
             SettingsSection::ThemeStore,
-            SettingsSection::Plugins,
             SettingsSection::Advanced,
             SettingsSection::Colors,
             SettingsSection::Keybindings,
         ]
-        .into_iter()
-        .filter(|section| Self::is_section_visible(*section, plugins_enabled, experimental_enabled))
-        .collect()
     }
 
     pub(super) fn set_active_section(
@@ -230,15 +186,6 @@ impl SettingsWindow {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let section = if Self::is_section_visible(
-            section,
-            self.is_plugins_section_enabled(),
-            Self::is_experimental_section_enabled(),
-        ) {
-            section
-        } else {
-            SettingsSection::Appearance
-        };
         self.active_section = section;
         self.active_input = None;
         self.capturing_action = None;
@@ -274,15 +221,9 @@ impl SettingsWindow {
         self.set_active_section(sections[next_index], window, cx);
     }
 
-    pub(super) fn build_searchable_settings(
-        include_plugins: bool,
-        include_experimental: bool,
-    ) -> Vec<SearchableSetting> {
+    pub(super) fn build_searchable_settings() -> Vec<SearchableSetting> {
         SETTINGS_METADATA
             .iter()
-            .filter(|metadata| {
-                Self::is_section_visible(metadata.section, include_plugins, include_experimental)
-            })
             .map(|metadata| {
                 let title_lower = metadata.title.to_ascii_lowercase();
                 let description_lower = metadata.description.to_ascii_lowercase();
@@ -318,14 +259,9 @@ impl SettingsWindow {
 
     pub(super) fn build_setting_scroll_anchors(
         content_scroll_handle: &ScrollHandle,
-        include_plugins: bool,
-        include_experimental: bool,
     ) -> HashMap<&'static str, ScrollAnchor> {
         SETTINGS_METADATA
             .iter()
-            .filter(|setting| {
-                Self::is_section_visible(setting.section, include_plugins, include_experimental)
-            })
             .map(|setting| {
                 (
                     setting.key,
@@ -632,21 +568,7 @@ impl SettingsWindow {
                     .child(self.render_sidebar_item("Appearance", SettingsSection::Appearance, cx))
                     .child(self.render_sidebar_item("Terminal", SettingsSection::Terminal, cx))
                     .child(self.render_sidebar_item("Tabs", SettingsSection::Tabs, cx))
-                    .when(Self::is_experimental_section_enabled(), |this| {
-                        this.child(self.render_sidebar_item(
-                            "Experimental",
-                            SettingsSection::Experimental,
-                            cx,
-                        ))
-                    })
                     .child(self.render_sidebar_item("Theme Store", SettingsSection::ThemeStore, cx))
-                    .when(self.config.show_plugins_tab, |this| {
-                        this.child(self.render_sidebar_item(
-                            "Plugins",
-                            SettingsSection::Plugins,
-                            cx,
-                        ))
-                    })
                     .child(self.render_sidebar_item("Advanced", SettingsSection::Advanced, cx))
                     .child(self.render_sidebar_item("Colors", SettingsSection::Colors, cx))
                     .child(self.render_sidebar_item(

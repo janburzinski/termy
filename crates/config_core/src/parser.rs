@@ -8,9 +8,9 @@ use crate::constants::{
 use crate::diagnostics::{ConfigDiagnostic, ConfigDiagnosticKind, ConfigParseReport};
 use crate::schema::{RootSettingId, root_setting_from_key, root_setting_spec};
 use crate::types::{
-    AiProvider, AppConfig, CursorStyle, KeybindConfigLine, PaneFocusEffect, TabCloseVisibility,
-    TabTitleMode, TabTitleSource, TabWidthMode, TaskConfig, TerminalScrollbarStyle,
-    TerminalScrollbarVisibility, ThemeId, WorkingDirFallback,
+    AppConfig, CursorStyle, KeybindConfigLine, PaneFocusEffect, TabCloseVisibility, TabTitleMode,
+    TabTitleSource, TabWidthMode, TaskConfig, TerminalScrollbarStyle, TerminalScrollbarVisibility,
+    ThemeId, WorkingDirFallback,
 };
 
 #[derive(Default)]
@@ -242,27 +242,6 @@ impl AppConfig {
                         parse_bool_field(&mut diagnostics, line_number, key, value)
                     {
                         config.native_buffer_persistence = parsed;
-                    }
-                }
-                RootSettingId::AgentSidebarEnabled => {
-                    if let Some(parsed) =
-                        parse_bool_field(&mut diagnostics, line_number, key, value)
-                    {
-                        config.agent_sidebar_enabled = parsed;
-                    }
-                }
-                RootSettingId::AgentSidebarWidth => {
-                    if let Some(parsed) =
-                        parse_positive_f32_field(&mut diagnostics, line_number, key, value)
-                    {
-                        config.agent_sidebar_width = parsed;
-                    }
-                }
-                RootSettingId::ShowPluginsTab => {
-                    if let Some(parsed) =
-                        parse_bool_field(&mut diagnostics, line_number, key, value)
-                    {
-                        config.show_plugins_tab = parsed;
                     }
                 }
                 RootSettingId::ShowDebugOverlay => {
@@ -697,28 +676,6 @@ impl AppConfig {
                     {
                         config.command_palette_show_keybinds = parsed;
                     }
-                }
-                RootSettingId::AiProvider => {
-                    if let Some(parsed) = AiProvider::from_str(value) {
-                        config.ai_provider = parsed;
-                    } else {
-                        push_invalid_value(
-                            &mut diagnostics,
-                            line_number,
-                            key,
-                            value,
-                            "one of: openai, gemini",
-                        );
-                    }
-                }
-                RootSettingId::OpenaiApiKey => {
-                    config.openai_api_key = parse_optional_string_value(value);
-                }
-                RootSettingId::GeminiApiKey => {
-                    config.gemini_api_key = parse_optional_string_value(value);
-                }
-                RootSettingId::OpenaiModel => {
-                    config.openai_model = parse_optional_string_value(value);
                 }
                 RootSettingId::Keybind => {
                     if let Some(parsed) = parse_string_field(

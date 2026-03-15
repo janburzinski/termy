@@ -5259,24 +5259,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7edddbd0b52d732b21ad9a5fab5c704c14cd949e5e9a1ec5929a24fded1b904c"
 
 [[package]]
-name = "plugin_example_status"
-version = "0.1.0"
-dependencies = [
- "termy_plugin_core",
- "termy_plugin_sdk",
-]
-
-[[package]]
-name = "plugin_release_notes"
-version = "0.1.0"
-dependencies = [
- "serde",
- "termy_plugin_core",
- "termy_plugin_sdk",
- "ureq",
-]
-
-[[package]]
 name = "png"
 version = "0.17.16"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -7350,7 +7332,7 @@ dependencies = [
 
 [[package]]
 name = "termy"
-version = "0.1.52"
+version = "0.1.53"
 dependencies = [
  "alacritty_terminal",
  "anyhow",
@@ -7369,7 +7351,6 @@ dependencies = [
  "smol",
  "sysinfo 0.37.2",
  "tempfile",
- "termy_agent_sidebar",
  "termy_auto_update",
  "termy_auto_update_ui",
  "termy_cli_install_core",
@@ -7378,8 +7359,6 @@ dependencies = [
  "termy_gemini",
  "termy_native_sdk",
  "termy_openai",
- "termy_plugin_core",
- "termy_plugin_host",
  "termy_search",
  "termy_terminal_ui",
  "termy_themes",
@@ -7388,13 +7367,6 @@ dependencies = [
  "url",
  "webbrowser",
  "winresource",
-]
-
-[[package]]
-name = "termy_agent_sidebar"
-version = "0.1.0"
-dependencies = [
- "gpui",
 ]
 
 [[package]]
@@ -7446,7 +7418,7 @@ dependencies = [
 
 [[package]]
 name = "termy_cli"
-version = "0.1.52"
+version = "0.1.53"
 dependencies = [
  "anyhow",
  "clap",
@@ -7458,8 +7430,6 @@ dependencies = [
  "termy_cli_install_core",
  "termy_command_core",
  "termy_config_core",
- "termy_plugin_core",
- "termy_plugin_host",
  "termy_release_core",
  "termy_theme_core",
  "termy_themes",
@@ -7513,39 +7483,6 @@ dependencies = [
  "serde_json",
  "thiserror 2.0.18",
  "ureq",
-]
-
-[[package]]
-name = "termy_plugin_core"
-version = "0.1.0"
-dependencies = [
- "serde",
- "serde_json",
- "thiserror 2.0.18",
-]
-
-[[package]]
-name = "termy_plugin_host"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "log",
- "serde",
- "serde_json",
- "termy_config_core",
- "termy_plugin_core",
- "termy_toast",
- "thiserror 2.0.18",
-]
-
-[[package]]
-name = "termy_plugin_sdk"
-version = "0.1.0"
-dependencies = [
- "serde",
- "serde_json",
- "termy_plugin_core",
- "thiserror 2.0.18",
 ]
 
 [[package]]

@@ -39,7 +39,6 @@ impl SettingsWindow {
             | EditableField::WorkingDirFallback
             | EditableField::WindowWidth
             | EditableField::WindowHeight
-            | EditableField::AgentSidebarWidth
             | EditableField::AiProvider
             | EditableField::OpenaiApiKey
             | EditableField::GeminiApiKey
@@ -520,89 +519,6 @@ impl SettingsWindow {
                     termy_config_core::RootSettingId::WindowHeight,
                     &parsed.to_string(),
                 )
-            }
-            EditableField::AgentSidebarWidth => {
-                let parsed = value
-                    .parse::<f32>()
-                    .map_err(|_| "Agent sidebar width must be a positive number".to_string())?;
-                if parsed < 180.0 || parsed > 1000.0 {
-                    return Err("Agent sidebar width must be between 180 and 1000".to_string());
-                }
-                self.config.agent_sidebar_width = parsed;
-                config::set_root_setting(
-                    termy_config_core::RootSettingId::AgentSidebarWidth,
-                    &parsed.to_string(),
-                )
-            }
-            EditableField::AiProvider => {
-                let parsed = match value.to_ascii_lowercase().as_str() {
-                    "openai" => termy_config_core::AiProvider::OpenAi,
-                    "gemini" => termy_config_core::AiProvider::Gemini,
-                    _ => return Err("AI provider must be openai or gemini".to_string()),
-                };
-                self.config.ai_provider = parsed;
-                let default_model = match parsed {
-                    termy_config_core::AiProvider::OpenAi => {
-                        termy_openai::DEFAULT_MODEL.to_string()
-                    }
-                    termy_config_core::AiProvider::Gemini => {
-                        termy_gemini::DEFAULT_MODEL.to_string()
-                    }
-                };
-                self.config.openai_model = Some(default_model.clone());
-                self.openai_model_options.clear();
-                self.openai_models_loaded_for_api_key = None;
-                self.openai_models_loading = false;
-                config::set_root_setting(
-                    termy_config_core::RootSettingId::AiProvider,
-                    match parsed {
-                        termy_config_core::AiProvider::OpenAi => "openai",
-                        termy_config_core::AiProvider::Gemini => "gemini",
-                    },
-                )?;
-                config::set_root_setting(
-                    termy_config_core::RootSettingId::OpenaiModel,
-                    &default_model,
-                )
-            }
-            EditableField::OpenaiApiKey => {
-                if value.is_empty() {
-                    self.config.openai_api_key = None;
-                    self.openai_model_options.clear();
-                    self.openai_models_loaded_for_api_key = None;
-                    self.openai_models_loading = false;
-                    config::set_root_setting(termy_config_core::RootSettingId::OpenaiApiKey, "none")
-                } else {
-                    self.config.openai_api_key = Some(value.to_string());
-                    self.openai_model_options.clear();
-                    self.openai_models_loaded_for_api_key = None;
-                    self.openai_models_loading = false;
-                    config::set_root_setting(termy_config_core::RootSettingId::OpenaiApiKey, value)
-                }
-            }
-            EditableField::GeminiApiKey => {
-                if value.is_empty() {
-                    self.config.gemini_api_key = None;
-                    self.openai_model_options.clear();
-                    self.openai_models_loaded_for_api_key = None;
-                    self.openai_models_loading = false;
-                    config::set_root_setting(termy_config_core::RootSettingId::GeminiApiKey, "none")
-                } else {
-                    self.config.gemini_api_key = Some(value.to_string());
-                    self.openai_model_options.clear();
-                    self.openai_models_loaded_for_api_key = None;
-                    self.openai_models_loading = false;
-                    config::set_root_setting(termy_config_core::RootSettingId::GeminiApiKey, value)
-                }
-            }
-            EditableField::OpenaiModel => {
-                if value.is_empty() {
-                    self.config.openai_model = None;
-                    config::set_root_setting(termy_config_core::RootSettingId::OpenaiModel, "none")
-                } else {
-                    self.config.openai_model = Some(value.to_string());
-                    config::set_root_setting(termy_config_core::RootSettingId::OpenaiModel, value)
-                }
             }
             _ => unreachable!("invalid advanced field"),
         }

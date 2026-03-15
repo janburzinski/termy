@@ -38,7 +38,6 @@ pub enum ContextMenuAction {
     Paste,
     OpenSearch,
     CopyBufferPosition,
-    AskAi,
     SearchGoogle,
 }
 
@@ -46,8 +45,7 @@ const CONTEXT_MENU_COPY_ID: i32 = 1;
 const CONTEXT_MENU_PASTE_ID: i32 = 2;
 const CONTEXT_MENU_OPEN_SEARCH_ID: i32 = 3;
 const CONTEXT_MENU_COPY_BUFFER_POSITION_ID: i32 = 4;
-const CONTEXT_MENU_ASK_AI_ID: i32 = 5;
-const CONTEXT_MENU_SEARCH_GOOGLE_ID: i32 = 6;
+const CONTEXT_MENU_SEARCH_GOOGLE_ID: i32 = 5;
 
 #[cfg(target_os = "macos")]
 static CONTEXT_MENU_SELECTION: AtomicI32 = AtomicI32::new(0);
@@ -185,7 +183,6 @@ pub fn show_copy_paste_context_menu(
     buffer_position_label: Option<String>,
     can_copy: bool,
     can_paste: bool,
-    can_ask_ai: bool,
     can_search_google: bool,
 ) -> Option<ContextMenuAction> {
     #[cfg(target_os = "macos")]
@@ -195,7 +192,6 @@ pub fn show_copy_paste_context_menu(
             buffer_position_label: Option<String>,
             can_copy: bool,
             can_paste: bool,
-            can_ask_ai: bool,
             can_search_google: bool,
         ) -> Option<ContextMenuAction> {
             let app = NSApplication::sharedApplication(mtm);
@@ -230,12 +226,6 @@ pub fn show_copy_paste_context_menu(
                 CONTEXT_MENU_COPY_BUFFER_POSITION_ID,
                 buffer_position_label.is_some(),
             );
-            let ask_ai_item = TermyContextMenuItem::new_with_action_id(
-                mtm,
-                "Ask AI",
-                CONTEXT_MENU_ASK_AI_ID,
-                can_ask_ai,
-            );
             let open_search_item = TermyContextMenuItem::new_with_action_id(
                 mtm,
                 "Open Search",
@@ -253,7 +243,6 @@ pub fn show_copy_paste_context_menu(
             menu.addItem(&paste_item);
             menu.addItem(&open_search_item);
             menu.addItem(&copy_buffer_position_item);
-            menu.addItem(&ask_ai_item);
             menu.addItem(&search_google_item);
 
             CONTEXT_MENU_SELECTION.store(0, Ordering::Relaxed);
@@ -265,7 +254,6 @@ pub fn show_copy_paste_context_menu(
                 CONTEXT_MENU_PASTE_ID => Some(ContextMenuAction::Paste),
                 CONTEXT_MENU_OPEN_SEARCH_ID => Some(ContextMenuAction::OpenSearch),
                 CONTEXT_MENU_COPY_BUFFER_POSITION_ID => Some(ContextMenuAction::CopyBufferPosition),
-                CONTEXT_MENU_ASK_AI_ID => Some(ContextMenuAction::AskAi),
                 CONTEXT_MENU_SEARCH_GOOGLE_ID => Some(ContextMenuAction::SearchGoogle),
                 _ => None,
             }
@@ -277,7 +265,6 @@ pub fn show_copy_paste_context_menu(
                 buffer_position_label,
                 can_copy,
                 can_paste,
-                can_ask_ai,
                 can_search_google,
             );
         }
@@ -287,7 +274,6 @@ pub fn show_copy_paste_context_menu(
                 buffer_position_label,
                 can_copy,
                 can_paste,
-                can_ask_ai,
                 can_search_google,
             )
         });
@@ -322,7 +308,6 @@ pub fn show_copy_paste_context_menu(
         let paste_title = wide_string("Paste");
         let open_search_title = wide_string("Open Search");
         let copy_buffer_position_title = wide_string("Copy Buffer Position");
-        let ask_ai_title = wide_string("Ask AI");
         let search_google_title = wide_string("Search Google");
         let copy_flags = if can_copy {
             MF_STRING
@@ -330,11 +315,6 @@ pub fn show_copy_paste_context_menu(
             MF_STRING | MF_GRAYED
         };
         let paste_flags = if can_paste {
-            MF_STRING
-        } else {
-            MF_STRING | MF_GRAYED
-        };
-        let ask_ai_flags = if can_ask_ai {
             MF_STRING
         } else {
             MF_STRING | MF_GRAYED
@@ -381,13 +361,6 @@ pub fn show_copy_paste_context_menu(
             .ok()?;
             AppendMenuW(
                 menu,
-                ask_ai_flags,
-                CONTEXT_MENU_ASK_AI_ID as usize,
-                windows::core::PCWSTR(ask_ai_title.as_ptr()),
-            )
-            .ok()?;
-            AppendMenuW(
-                menu,
                 search_google_flags,
                 CONTEXT_MENU_SEARCH_GOOGLE_ID as usize,
                 windows::core::PCWSTR(search_google_title.as_ptr()),
@@ -418,7 +391,6 @@ pub fn show_copy_paste_context_menu(
             CONTEXT_MENU_PASTE_ID => Some(ContextMenuAction::Paste),
             CONTEXT_MENU_OPEN_SEARCH_ID => Some(ContextMenuAction::OpenSearch),
             CONTEXT_MENU_COPY_BUFFER_POSITION_ID => Some(ContextMenuAction::CopyBufferPosition),
-            CONTEXT_MENU_ASK_AI_ID => Some(ContextMenuAction::AskAi),
             CONTEXT_MENU_SEARCH_GOOGLE_ID => Some(ContextMenuAction::SearchGoogle),
             _ => None,
         };
@@ -433,7 +405,6 @@ pub fn show_copy_paste_context_menu(
             buffer_position_label,
             can_copy,
             can_paste,
-            can_ask_ai,
             can_search_google,
         );
         None

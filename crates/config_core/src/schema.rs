@@ -1,6 +1,6 @@
 use crate::types::{
-    AiProvider, AppConfig, CursorStyle, PaneFocusEffect, TabCloseVisibility, TabTitleMode,
-    TabWidthMode, TerminalScrollbarStyle, TerminalScrollbarVisibility, WorkingDirFallback,
+    AppConfig, CursorStyle, PaneFocusEffect, TabCloseVisibility, TabTitleMode, TabWidthMode,
+    TerminalScrollbarStyle, TerminalScrollbarVisibility, WorkingDirFallback,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -295,17 +295,6 @@ pub const PANE_FOCUS_EFFECT_ENUM_CHOICES: &[EnumChoice] = &[
     },
 ];
 
-pub const AI_PROVIDER_ENUM_CHOICES: &[EnumChoice] = &[
-    EnumChoice {
-        value: "openai",
-        label: "OpenAI",
-    },
-    EnumChoice {
-        value: "gemini",
-        label: "Gemini",
-    },
-];
-
 define_root_settings! {
     (Theme, "theme", [], Appearance, "THEME", "Theme", "Current color scheme name", ["color", "scheme", "appearance"], RootSettingValueKind::Special, false),
     (AutoUpdate, "auto_update", [], Advanced, "UPDATES", "Auto Update", "Enable automatic update checks and notifications", ["update", "check", "upgrade", "version"], RootSettingValueKind::Boolean, false),
@@ -314,9 +303,6 @@ define_root_settings! {
     (NativeTabPersistence, "native_tab_persistence", [], Advanced, "STARTUP", "Native Tab Persistence", "Restore native tabs and pane splits across app restarts", ["native", "tabs", "panes", "split", "restore", "startup"], RootSettingValueKind::Boolean, false),
     (NativeLayoutAutosave, "native_layout_autosave", [], Advanced, "STARTUP", "Native Layout Autosave", "Auto-save changes back into the currently loaded named layout", ["native", "layout", "autosave", "saved", "snapshot"], RootSettingValueKind::Boolean, false),
     (NativeBufferPersistence, "native_buffer_persistence", [], Advanced, "STARTUP", "Native Buffer Persistence", "Replay saved buffer text when restoring native layouts", ["native", "buffer", "scrollback", "history", "restore"], RootSettingValueKind::Boolean, false),
-    (AgentSidebarEnabled, "agent_sidebar_enabled", [], Advanced, "UI", "Enable Agent Sidebar", "Allow the experimental agent sidebar to be toggled with the keyboard shortcut", ["agent", "sidebar", "experimental", "assistant", "panel"], RootSettingValueKind::Boolean, false),
-    (AgentSidebarWidth, "agent_sidebar_width", [], Advanced, "UI", "Agent Sidebar Width", "Saved width for the experimental agent sidebar in pixels", ["agent", "sidebar", "width", "panel"], RootSettingValueKind::Numeric, false),
-    (ShowPluginsTab, "show_plugins_tab", [], Advanced, "UI", "Show Plugins Tab", "Show the Plugins section in Settings", ["plugins", "settings", "sidebar", "tab"], RootSettingValueKind::Boolean, false),
     (ShowDebugOverlay, "show_debug_overlay", [], Advanced, "UI", "Show Debug Overlay", "Show FPS, CPU, and memory in the terminal corner", ["debug", "overlay", "fps", "cpu", "memory"], RootSettingValueKind::Boolean, false),
     (TmuxBinary, "tmux_binary", [], Terminal, "TMUX", "Tmux Binary", "tmux executable path or binary name", ["tmux", "binary", "path"], RootSettingValueKind::Text, false),
     (TmuxShowActivePaneBorder, "tmux_show_active_pane_border", [], Terminal, "TMUX", "Show Active Pane Border", "Show active tmux pane border highlight in managed sessions", ["tmux", "pane", "border", "highlight"], RootSettingValueKind::Boolean, false),
@@ -362,10 +348,6 @@ define_root_settings! {
     (CopyOnSelect, "copy_on_select", [], Terminal, "CLIPBOARD", "Copy On Select", "Automatically copy selected text to clipboard", ["copy", "select", "clipboard", "selection"], RootSettingValueKind::Boolean, false),
     (CopyOnSelectToast, "copy_on_select_toast", [], Terminal, "CLIPBOARD", "Copy On Select Toast", "Show a toast notification when text is copied on select", ["copy", "select", "toast", "notification"], RootSettingValueKind::Boolean, false),
     (CommandPaletteShowKeybinds, "command_palette_show_keybinds", [], Terminal, "UI", "Show Keybindings In Palette", "Show shortcut badges in command palette rows", ["palette", "keybinds", "shortcuts"], RootSettingValueKind::Boolean, false),
-    (AiProvider, "ai_provider", [], Advanced, "AI", "AI Provider", "Provider used for AI input and model listing", ["ai", "provider", "openai", "gemini"], RootSettingValueKind::Enum, false),
-    (OpenaiApiKey, "openai_api_key", ["openai_key"], Advanced, "AI", "OpenAI API Key", "API key for OpenAI integration", ["openai", "api", "key", "ai", "gpt"], RootSettingValueKind::Text, false),
-    (GeminiApiKey, "gemini_api_key", ["google_ai_api_key"], Advanced, "AI", "Gemini API Key", "API key for Google Gemini integration", ["gemini", "google", "api", "key", "ai"], RootSettingValueKind::Text, false),
-    (OpenaiModel, "openai_model", ["ai_model"], Advanced, "AI", "AI Model", "Model used for AI input requests", ["openai", "gemini", "model", "ai", "gpt"], RootSettingValueKind::Text, false),
     (Keybind, "keybind", [], Keybindings, "KEYBINDS", "Keybind Directive", "Keybinding override directive", ["keybind", "shortcut", "command"], RootSettingValueKind::Special, true),
 }
 
@@ -413,7 +395,7 @@ pub fn root_setting_enum_choices(id: RootSettingId) -> Option<&'static [EnumChoi
         RootSettingId::ScrollbarVisibility => Some(SCROLLBAR_VISIBILITY_ENUM_CHOICES),
         RootSettingId::ScrollbarStyle => Some(SCROLLBAR_STYLE_ENUM_CHOICES),
         RootSettingId::PaneFocusEffect => Some(PANE_FOCUS_EFFECT_ENUM_CHOICES),
-        RootSettingId::AiProvider => Some(AI_PROVIDER_ENUM_CHOICES),
+
         _ => None,
     }
 }
@@ -429,9 +411,6 @@ pub fn root_setting_default_value(config: &AppConfig, id: RootSettingId) -> Opti
         RootSettingId::NativeBufferPersistence => {
             Some(config.native_buffer_persistence.to_string())
         }
-        RootSettingId::AgentSidebarEnabled => Some(config.agent_sidebar_enabled.to_string()),
-        RootSettingId::AgentSidebarWidth => Some(config.agent_sidebar_width.to_string()),
-        RootSettingId::ShowPluginsTab => Some(config.show_plugins_tab.to_string()),
         RootSettingId::ShowDebugOverlay => Some(config.show_debug_overlay.to_string()),
         RootSettingId::TmuxBinary => Some(config.tmux_binary.clone()),
         RootSettingId::TmuxShowActivePaneBorder => {
@@ -532,13 +511,6 @@ pub fn root_setting_default_value(config: &AppConfig, id: RootSettingId) -> Opti
         RootSettingId::CommandPaletteShowKeybinds => {
             Some(config.command_palette_show_keybinds.to_string())
         }
-        RootSettingId::AiProvider => Some(match config.ai_provider {
-            AiProvider::OpenAi => "openai".to_string(),
-            AiProvider::Gemini => "gemini".to_string(),
-        }),
-        RootSettingId::OpenaiApiKey => config.openai_api_key.clone(),
-        RootSettingId::GeminiApiKey => config.gemini_api_key.clone(),
-        RootSettingId::OpenaiModel => config.openai_model.clone(),
         RootSettingId::Keybind => None,
     }
 }
@@ -627,15 +599,6 @@ mod tests {
         assert_eq!(
             enum_choice_values(RootSettingId::PaneFocusEffect),
             vec!["off", "soft_spotlight", "cinematic", "minimal"]
-        );
-
-        assert_eq!(
-            root_setting_value_kind(RootSettingId::AiProvider),
-            RootSettingValueKind::Enum
-        );
-        assert_eq!(
-            enum_choice_values(RootSettingId::AiProvider),
-            vec!["openai", "gemini"]
         );
     }
 

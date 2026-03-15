@@ -80,6 +80,34 @@ pub fn remove_root_setting(contents: &str, setting: RootSettingId) -> String {
     join_lines(out)
 }
 
+/// Remove all root-level lines whose key matches `key` (case-insensitive).
+/// Used to remove unknown/removed config keys that don't map to a `RootSettingId`.
+pub fn remove_raw_root_key(contents: &str, key: &str) -> String {
+    let mut out = Vec::new();
+    let mut in_root = true;
+
+    for line in contents.lines() {
+        let trimmed = line.trim();
+        let is_section_header = trimmed.starts_with('[') && trimmed.ends_with(']');
+        if is_section_header {
+            in_root = false;
+            out.push(line.to_string());
+            continue;
+        }
+
+        if in_root
+            && let Some((raw_key, _)) = line.split_once('=')
+            && raw_key.trim().eq_ignore_ascii_case(key)
+        {
+            continue;
+        }
+
+        out.push(line.to_string());
+    }
+
+    join_lines(out)
+}
+
 pub fn replace_keybind_lines(contents: &str, keybind_lines: &[String]) -> String {
     let mut out = Vec::new();
     let mut in_root = true;

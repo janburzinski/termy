@@ -1,6 +1,5 @@
 use crate::colors::TerminalColors;
 use crate::config::{self, AiProvider as ConfigAiProvider, AppConfig};
-use crate::plugins::{self, PluginInventoryEntry};
 use crate::text_input::{TextInputAlignment, TextInputElement, TextInputProvider, TextInputState};
 use crate::theme_store::{self, ThemeStoreAuthSession, ThemeStoreAuthUser, ThemeStoreTheme};
 use crate::ui::scrollbar::{self as ui_scrollbar, ScrollbarPaintStyle, ScrollbarRange};
@@ -46,7 +45,6 @@ const SETTINGS_CONTROL_HEIGHT: f32 = 36.0;
 const NUMERIC_STEP_BUTTON_SIZE: f32 = 26.0;
 const SETTINGS_INPUT_TEXT_SIZE: f32 = 13.0;
 const SETTINGS_CONFIG_WATCH_INTERVAL_MS: u64 = 750;
-const SETTINGS_PLUGIN_POLL_INTERVAL_MS: u64 = 900;
 const SETTINGS_SEARCH_NAV_THROTTLE_MS: u64 = 70;
 const SETTINGS_SCROLL_ANIMATION_DURATION_MS: u64 = 170;
 const SETTINGS_SCROLL_ANIMATION_TICK_MS: u64 = 16;
@@ -70,9 +68,7 @@ pub(crate) enum SettingsSection {
     Appearance,
     Terminal,
     Tabs,
-    Experimental,
     ThemeStore,
-    Plugins,
     Advanced,
     Colors,
     Keybindings,
@@ -124,9 +120,6 @@ pub struct SettingsWindow {
     theme_store_auth_loading: bool,
     theme_store_auth_error: Option<String>,
     theme_store_installed_versions: HashMap<String, String>,
-    plugin_directory: Option<PathBuf>,
-    plugin_inventory: Vec<PluginInventoryEntry>,
-    plugin_inventory_error: Option<String>,
 }
 
 impl SettingsWindow {
@@ -149,21 +142,13 @@ impl SettingsWindow {
         available_font_families.sort_unstable_by_key(|font| font.to_ascii_lowercase());
         available_font_families.dedup_by(|left, right| left.eq_ignore_ascii_case(right));
         let colors = TerminalColors::from_theme(&config.theme, &config.colors);
-        let searchable_settings = Self::build_searchable_settings(
-            config.show_plugins_tab,
-            crate::experimental::has_entries(),
-        );
+        let searchable_settings = Self::build_searchable_settings();
         let searchable_setting_indices =
             Self::build_searchable_setting_indices(&searchable_settings);
         let content_scroll_handle = ScrollHandle::new();
-        let setting_scroll_anchors = Self::build_setting_scroll_anchors(
-            &content_scroll_handle,
-            config.show_plugins_tab,
-            crate::experimental::has_entries(),
-        );
+        let setting_scroll_anchors =
+            Self::build_setting_scroll_anchors(&content_scroll_handle);
         let theme_store_auth_session = theme_store::load_auth_session();
-        let (plugin_directory, plugin_inventory, plugin_inventory_error) =
-            Self::load_plugin_inventory();
         let mut view = Self {
             active_section: SettingsSection::Appearance,
             config,
@@ -205,9 +190,6 @@ impl SettingsWindow {
             theme_store_auth_loading: false,
             theme_store_auth_error: None,
             theme_store_installed_versions: theme_store::load_installed_theme_versions(),
-            plugin_directory,
-            plugin_inventory,
-            plugin_inventory_error,
         };
         view.focus_handle.focus(window, cx);
         if view.theme_store_auth_session.is_some() {
@@ -282,49 +264,11 @@ impl SettingsWindow {
         })
         .detach();
 
-        cx.spawn(async move |this: WeakEntity<Self>, cx: &mut AsyncApp| {
-            loop {
-                smol::Timer::after(Duration::from_millis(SETTINGS_PLUGIN_POLL_INTERVAL_MS)).await;
-                let result = cx.update(|cx| {
-                    this.update(cx, |view, cx| {
-                        let (directory, entries, error) = Self::load_plugin_inventory();
-                        if view.plugin_directory != directory
-                            || view.plugin_inventory != entries
-                            || view.plugin_inventory_error != error
-                        {
-                            view.plugin_directory = directory;
-                            view.plugin_inventory = entries;
-                            view.plugin_inventory_error = error;
-                            cx.notify();
-                        }
-                    })
-                });
-                if result.is_err() {
-                    break;
-                }
-            }
-        })
-        .detach();
-
         view
     }
 
     fn theme_store_api_base_url() -> String {
         theme_store::theme_store_api_base_url()
-    }
-
-    fn load_plugin_inventory() -> (Option<PathBuf>, Vec<PluginInventoryEntry>, Option<String>) {
-        match plugins::plugin_inventory() {
-            Ok(inventory) => (Some(inventory.root_dir), inventory.entries, None),
-            Err(error) => (None, Vec::new(), Some(error)),
-        }
-    }
-
-    fn refresh_plugin_inventory(&mut self) {
-        let (directory, entries, error) = Self::load_plugin_inventory();
-        self.plugin_directory = directory;
-        self.plugin_inventory = entries;
-        self.plugin_inventory_error = error;
     }
 
     fn ensure_theme_store_themes_loaded(&mut self, cx: &mut Context<Self>) {
@@ -645,50 +589,9 @@ impl SettingsWindow {
         Err(format!("Failed to open URL: {url}"))
     }
 
-    pub(super) fn open_path(path: &std::path::Path) -> Result<(), String> {
-        let path_str = path.to_string_lossy().to_string();
-        #[cfg(target_os = "macos")]
-        {
-            Command::new("open")
-                .arg(&path_str)
-                .stdin(Stdio::null())
-                .stdout(Stdio::null())
-                .stderr(Stdio::null())
-                .spawn()
-                .map_err(|error| format!("Failed to open path: {error}"))?;
-            return Ok(());
-        }
-        #[cfg(target_os = "linux")]
-        {
-            Command::new("xdg-open")
-                .arg(&path_str)
-                .stdin(Stdio::null())
-                .stdout(Stdio::null())
-                .stderr(Stdio::null())
-                .spawn()
-                .map_err(|error| format!("Failed to open path: {error}"))?;
-            return Ok(());
-        }
-        #[cfg(target_os = "windows")]
-        {
-            Command::new("cmd")
-                .args(["/C", "start", "", &path_str])
-                .stdin(Stdio::null())
-                .stdout(Stdio::null())
-                .stderr(Stdio::null())
-                .spawn()
-                .map_err(|error| format!("Failed to open path: {error}"))?;
-            return Ok(());
-        }
-        #[allow(unreachable_code)]
-        Err("Opening paths is not supported on this platform".to_string())
-    }
-
     fn apply_runtime_config(&mut self, config: AppConfig) -> bool {
         let previous_provider = self.config.ai_provider;
         let next_provider = config.ai_provider;
-        let previous_show_plugins_tab = self.config.show_plugins_tab;
-        let next_show_plugins_tab = config.show_plugins_tab;
         let previous_api_key = match previous_provider {
             ConfigAiProvider::OpenAi => self.config.openai_api_key.clone(),
             ConfigAiProvider::Gemini => self.config.gemini_api_key.clone(),
@@ -718,22 +621,6 @@ impl SettingsWindow {
                 && self.background_opacity_drag_state.is_none()
             {
                 config::publish_background_opacity_preview(None);
-            }
-        }
-        if previous_show_plugins_tab != next_show_plugins_tab {
-            self.searchable_settings = Self::build_searchable_settings(
-                next_show_plugins_tab,
-                crate::experimental::has_entries(),
-            );
-            self.searchable_setting_indices =
-                Self::build_searchable_setting_indices(&self.searchable_settings);
-            self.setting_scroll_anchors = Self::build_setting_scroll_anchors(
-                &self.content_scroll_handle,
-                next_show_plugins_tab,
-                crate::experimental::has_entries(),
-            );
-            if self.active_section == SettingsSection::Plugins && !next_show_plugins_tab {
-                self.active_section = SettingsSection::Appearance;
             }
         }
         true

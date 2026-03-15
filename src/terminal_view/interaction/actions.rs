@@ -112,17 +112,6 @@ impl TerminalView {
             CommandAction::Quit => {
                 self.execute_quit_command_action(action, window, cx);
             }
-            CommandAction::ToggleAgentSidebar => {
-                if !self.agent_sidebar_enabled {
-                    self.notify_overlay(cx);
-                    return;
-                }
-                self.agent_sidebar_open = !self.agent_sidebar_open;
-                if !self.agent_sidebar_open {
-                    self.agent_sidebar_input_active = false;
-                }
-                cx.notify();
-            }
             CommandAction::ToggleVerticalTabSidebar => {
                 if !self.vertical_tabs {
                     termy_toast::info(
@@ -204,13 +193,6 @@ impl TerminalView {
             CommandAction::InstallCli => {
                 self.execute_install_cli_command_action(action, cx);
             }
-            CommandAction::ToggleAiInput => {
-                if self.is_ai_input_open() {
-                    self.close_ai_input(cx);
-                } else {
-                    self.open_ai_input(cx);
-                }
-            }
         }
     }
 
@@ -284,15 +266,6 @@ impl TerminalView {
         cx: &mut Context<Self>,
     ) {
         self.execute_command_action(CommandAction::CheckForUpdates, true, window, cx);
-    }
-
-    pub(in super::super) fn handle_toggle_agent_sidebar_action(
-        &mut self,
-        _: &commands::ToggleAgentSidebar,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        self.execute_command_action(CommandAction::ToggleAgentSidebar, true, window, cx);
     }
 
     pub(in super::super) fn handle_toggle_vertical_tab_sidebar_action(
@@ -743,15 +716,6 @@ impl TerminalView {
         cx: &mut Context<Self>,
     ) {
         self.execute_command_action(CommandAction::InstallCli, true, window, cx);
-    }
-
-    pub(in super::super) fn handle_toggle_ai_input_action(
-        &mut self,
-        _: &commands::ToggleAiInput,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        self.execute_command_action(CommandAction::ToggleAiInput, true, window, cx);
     }
 }
 

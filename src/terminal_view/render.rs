@@ -402,10 +402,7 @@ fn effective_pane_focus_active_border_alpha(
     active_border_alpha
 }
 
-fn pane_focus_factors(
-    is_active_pane: bool,
-    pane_focus_enabled: bool,
-) -> (f32, f32) {
+fn pane_focus_factors(is_active_pane: bool, pane_focus_enabled: bool) -> (f32, f32) {
     if !pane_focus_enabled {
         return (0.0, 0.0);
     }
@@ -1342,6 +1339,7 @@ impl TerminalView {
         for toast in self.toast_manager.active().iter() {
             let toast_id = toast.id;
             let toast_message = toast.message.clone();
+            let toast_action_label = toast.action_label.clone();
             let is_hovered = self.hovered_toast == Some(toast_id);
             let is_copied = self
                 .copied_toast_feedback
@@ -1462,7 +1460,38 @@ impl TerminalView {
                                     .flex()
                                     .items_center()
                                     .justify_end()
-                                    .children(is_copied.then(|| {
+                                    // "Fix" button — always visible for actionable toasts
+                                    .children(toast_action_label.as_ref().map(|label| {
+                                        let label = label.clone();
+                                        let mut action_bg = accent;
+                                        action_bg.a = 0.18;
+                                        div()
+                                            .rounded(px(6.0))
+                                            .px(px(8.0))
+                                            .py(px(4.0))
+                                            .text_size(px(11.0))
+                                            .text_color(accent)
+                                            .bg(action_bg)
+                                            .hover(move |style| {
+                                                let mut hover_bg = accent;
+                                                hover_bg.a = 0.32;
+                                                style.bg(hover_bg)
+                                            })
+                                            .cursor_pointer()
+                                            .on_mouse_down(
+                                                MouseButton::Left,
+                                                cx.listener(move |this, _event, _window, cx| {
+                                                    crate::config::execute_fix_for_toast(toast_id);
+                                                    termy_toast::dismiss_toast(toast_id);
+                                                    termy_toast::success("Config fixed");
+                                                    this.notify_overlay(cx);
+                                                    cx.stop_propagation();
+                                                }),
+                                            )
+                                            .child(label)
+                                    }))
+                                    // "Copied" feedback
+                                    .children((toast_action_label.is_none() && is_copied).then(|| {
                                         let mut copied_bg = accent;
                                         copied_bg.a = 0.22;
                                         div()
@@ -1474,7 +1503,8 @@ impl TerminalView {
                                             .bg(copied_bg)
                                             .child("Copied")
                                     }))
-                                    .children((!is_copied && is_hovered).then(|| {
+                                    // "Copy" button — shown on hover when no action button
+                                    .children((toast_action_label.is_none() && !is_copied && is_hovered).then(|| {
                                         let toast_message_for_copy = toast_message.clone();
                                         div()
                                             .rounded(px(6.0))
@@ -1658,30 +1688,6 @@ impl TerminalView {
                         .child(label)
                         .into_any_element()
                 };
-            let ask_ai_item = |enabled: bool| {
-                let text_color = if enabled { text_active } else { text_disabled };
-                div()
-                    .id("terminal-context-menu-ask-ai")
-                    .h(px(row_height))
-                    .px(px(10.0))
-                    .flex()
-                    .items_center()
-                    .text_size(px(13.0))
-                    .text_color(text_color)
-                    .when(enabled, |s| s.cursor_pointer())
-                    .when(enabled, |s| s.hover(|style| style.bg(hover_bg)))
-                    .when(enabled, |s| {
-                        s.on_mouse_down(
-                            MouseButton::Left,
-                            cx.listener(move |view, _event: &MouseDownEvent, _window, cx| {
-                                view.execute_terminal_context_menu_ask_ai(cx);
-                                cx.stop_propagation();
-                            }),
-                        )
-                    })
-                    .child("Ask AI")
-                    .into_any_element()
-            };
             let open_search_item = || {
                 div()
                     .id("terminal-context-menu-open-search")
@@ -1830,7 +1836,6 @@ impl TerminalView {
                                 CommandAction::Paste,
                             ))
                             .child(open_search_item())
-                            .child(ask_ai_item(state.can_ask_ai))
                             .child(search_google_item(state.can_search_google)),
                     )
                     .into_any_element(),
@@ -1923,28 +1928,20 @@ impl TerminalView {
         } else {
             None
         };
-        let ai_input_overlay = if self.is_ai_input_open() {
-            Some(self.render_ai_input_modal(cx))
-        } else {
-            None
-        };
         let chrome_height = self.chrome_height();
-        let terminal_overlay = (command_palette_overlay.is_some()
-            || search_overlay.is_some()
-            || ai_input_overlay.is_some())
-        .then(|| {
-            div()
-                .id("terminal-scoped-overlay")
-                .absolute()
-                .top(px(chrome_height))
-                .left_0()
-                .right_0()
-                .bottom_0()
-                .children(command_palette_overlay)
-                .children(search_overlay)
-                .children(ai_input_overlay)
-                .into_any_element()
-        });
+        let terminal_overlay = (command_palette_overlay.is_some() || search_overlay.is_some())
+            .then(|| {
+                div()
+                    .id("terminal-scoped-overlay")
+                    .absolute()
+                    .top(px(chrome_height))
+                    .left_0()
+                    .right_0()
+                    .bottom_0()
+                    .children(command_palette_overlay)
+                    .children(search_overlay)
+                    .into_any_element()
+            });
         let context_menu_overlay = self.render_terminal_context_menu_overlay(cx);
         let toast_overlay = self.render_toast_overlay(&colors, cx);
         let resize_overlay = self
@@ -2425,8 +2422,7 @@ impl Render for TerminalView {
         let focus_handle = self.focus_handle.clone();
         let titlebar_height = Self::titlebar_height();
         let tabbar_bg = terminal_surface_bg;
-        let show_tabbar = !self.vertical_tabs
-            && !(self.auto_hide_tabbar && self.tabs.len() <= 1);
+        let show_tabbar = !self.vertical_tabs && !(self.auto_hide_tabbar && self.tabs.len() <= 1);
         let tabs_row = show_tabbar
             .then(|| self.render_tab_strip(window, &colors, &font_family, tabbar_bg, cx));
         let vertical_tab_strip = self
@@ -2444,7 +2440,6 @@ impl Render for TerminalView {
         });
         #[cfg(not(target_os = "macos"))]
         let banner_spacer: Option<AnyElement> = None;
-        let terminal_surface_bg_hsla: gpui::Hsla = terminal_surface_bg.into();
         if self.terminal_scrollbar_mode() == ui_scrollbar::ScrollbarVisibilityMode::OnScroll
             && !self.terminal_scrollbar_animation_active
             && self.terminal_scrollbar_needs_animation(Instant::now())
@@ -2512,87 +2507,6 @@ impl Render for TerminalView {
                     .child(text.clone())
                     .into_any_element(),
             )
-        });
-        let mut agent_sidebar_muted: gpui::Hsla = self.colors.foreground.into();
-        agent_sidebar_muted.a = 0.72;
-        let agent_sidebar = self.agent_sidebar_visible().then(|| {
-            let text_color: gpui::Hsla = self.colors.foreground.into();
-            let mut selection_color = text_color;
-            selection_color.a = 0.3;
-            let has_text = !self.agent_sidebar_input.text().is_empty();
-            let input_content = div()
-                .id("agent-sidebar-input")
-                .w_full()
-                .h(px(20.0))
-                .overflow_hidden()
-                .cursor_text()
-                .on_mouse_down(
-                    MouseButton::Left,
-                    cx.listener(|view, _event: &MouseDownEvent, window, cx| {
-                        view.agent_sidebar_input_active = true;
-                        view.focus_handle.focus(window, cx);
-                        cx.notify();
-                    }),
-                )
-                .child(if self.agent_sidebar_input_active {
-                    InlineInputElement::new(
-                        cx.entity(),
-                        self.focus_handle.clone(),
-                        Font {
-                            family: self.font_family.clone(),
-                            ..Font::default()
-                        },
-                        px(14.0),
-                        text_color,
-                        selection_color,
-                        InlineInputAlignment::Left,
-                    )
-                    .into_any_element()
-                } else if has_text {
-                    div()
-                        .text_size(px(14.0))
-                        .text_color(text_color)
-                        .child(self.agent_sidebar_input.text().to_string())
-                        .into_any_element()
-                } else {
-                    let mut ghost = agent_sidebar_muted;
-                    ghost.a = 0.74;
-                    div()
-                        .text_size(px(14.0))
-                        .text_color(ghost)
-                        .child("Message Agent")
-                        .into_any_element()
-                })
-                .into_any_element();
-            div()
-                .relative()
-                .h_full()
-                .child(
-                    div()
-                        .id("agent-sidebar-resize-handle")
-                        .absolute()
-                        .left(px(0.0))
-                        .top(px(0.0))
-                        .w(px(8.0))
-                        .h_full()
-                        .cursor_col_resize()
-                        .on_mouse_down(
-                            MouseButton::Left,
-                            cx.listener(|view, _event: &MouseDownEvent, _window, cx| {
-                                view.agent_sidebar_resize_drag = Some(AgentSidebarResizeDragState);
-                                cx.stop_propagation();
-                            }),
-                        ),
-                )
-                .child(termy_agent_sidebar::render_sidebar(
-                    self.agent_sidebar_width,
-                    terminal_surface_bg_hsla,
-                    divider_color,
-                    self.colors.foreground.into(),
-                    agent_sidebar_muted,
-                    input_content,
-                ))
-                .into_any_element()
         });
         let overlay_view = self.ensure_overlay_view(cx);
         let key_context = if self.has_active_inline_input() {
@@ -2734,8 +2648,6 @@ impl Render for TerminalView {
                     .when(self.install_cli_available(), |s| {
                         s.on_action(cx.listener(Self::handle_install_cli_action))
                     })
-                    .on_action(cx.listener(Self::handle_toggle_ai_input_action))
-                    .on_action(cx.listener(Self::handle_toggle_agent_sidebar_action))
                     .on_action(cx.listener(Self::handle_toggle_vertical_tab_sidebar_action))
                     .on_action(cx.listener(Self::handle_inline_backspace_action))
                     .on_action(cx.listener(Self::handle_inline_delete_action))
@@ -2812,8 +2724,7 @@ impl Render for TerminalView {
                                     .child(terminal_grid_layer)
                                     .children(ime_preedit_overlay)
                                     .children(terminal_scrollbar_overlay),
-                            )
-                            .children(agent_sidebar),
+                            ),
                     ),
             )
             .child(overlay_view);

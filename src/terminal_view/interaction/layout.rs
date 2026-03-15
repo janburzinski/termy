@@ -18,14 +18,6 @@ impl TerminalView {
         self.effective_vertical_tab_strip_width()
     }
 
-    fn agent_sidebar_width(&self) -> f32 {
-        if self.agent_sidebar_visible() {
-            self.agent_sidebar_width
-        } else {
-            0.0
-        }
-    }
-
     pub(in super::super) fn native_pane_min_extent_for_axis(axis: PaneResizeAxis) -> u16 {
         match axis {
             PaneResizeAxis::Horizontal => NATIVE_PANE_MIN_COLS,
@@ -291,7 +283,6 @@ impl TerminalView {
 
         let terminal_width = (viewport_width
             - self.tab_strip_sidebar_width()
-            - self.agent_sidebar_width()
             - (padding_x * 2.0))
             .max(cell_width * 2.0);
         let terminal_height =

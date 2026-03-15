@@ -1,6 +1,6 @@
 [package]
 name = "termy_cli"
-version = "0.1.52"
+version = "0.1.53"
 edition = "2024"
 
 [[bin]]
@@ -19,8 +19,6 @@ termy_cli_install_core = { path = "../cli_install_core" }
 termy_theme_core = { path = "../theme_core" }
 termy_themes = { path = "../themes" }
 termy_release_core = { path = "../release_core" }
-termy_plugin_core = { path = "../plugin_core" }
-termy_plugin_host = { path = "../plugin_host" }
 
 # For list-fonts (platform-specific)
 [target.'cfg(target_os = "macos")'.dependencies]

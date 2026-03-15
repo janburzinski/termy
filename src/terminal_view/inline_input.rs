@@ -48,8 +48,6 @@ enum InlineInputTarget {
     CommandPalette,
     RenameTab,
     Search,
-    AiInput,
-    AgentSidebar,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -902,26 +900,12 @@ impl IntoElement for InlineInputElement {
 }
 
 impl TerminalView {
-    pub(super) fn handle_agent_sidebar_key_down(&mut self, key: &str, cx: &mut Context<Self>) {
-        match key {
-            "escape" => {
-                self.agent_sidebar_input_active = false;
-                cx.notify();
-            }
-            _ => {
-                // Text input is handled via InlineInput/EntityInputHandler
-            }
-        }
-    }
-
     fn inline_input_notify_target_for_target(target: InlineInputTarget) -> InlineInputNotifyTarget {
         match target {
-            InlineInputTarget::CommandPalette | InlineInputTarget::AiInput => {
-                InlineInputNotifyTarget::Overlay
+            InlineInputTarget::CommandPalette => InlineInputNotifyTarget::Overlay,
+            InlineInputTarget::RenameTab | InlineInputTarget::Search => {
+                InlineInputNotifyTarget::Parent
             }
-            InlineInputTarget::RenameTab
-            | InlineInputTarget::Search
-            | InlineInputTarget::AgentSidebar => InlineInputNotifyTarget::Parent,
         }
     }
 
@@ -947,10 +931,6 @@ impl TerminalView {
             Some(InlineInputTarget::Search)
         } else if self.renaming_tab.is_some() {
             Some(InlineInputTarget::RenameTab)
-        } else if self.ai_input_open {
-            Some(InlineInputTarget::AiInput)
-        } else if self.agent_sidebar_input_active && self.agent_sidebar_visible() {
-            Some(InlineInputTarget::AgentSidebar)
         } else {
             None
         }
@@ -1006,8 +986,6 @@ impl TerminalView {
             InlineInputTarget::CommandPalette => Some(self.command_palette_input()),
             InlineInputTarget::Search => Some(&self.search_input),
             InlineInputTarget::RenameTab => Some(&self.rename_input),
-            InlineInputTarget::AiInput => Some(self.ai_input()),
-            InlineInputTarget::AgentSidebar => Some(&self.agent_sidebar_input),
         }
     }
 
@@ -1016,8 +994,6 @@ impl TerminalView {
             InlineInputTarget::CommandPalette => Some(self.command_palette_input_mut()),
             InlineInputTarget::Search => Some(&mut self.search_input),
             InlineInputTarget::RenameTab => Some(&mut self.rename_input),
-            InlineInputTarget::AiInput => Some(self.ai_input_mut()),
-            InlineInputTarget::AgentSidebar => Some(&mut self.agent_sidebar_input),
         }
     }
 
@@ -1061,14 +1037,6 @@ impl TerminalView {
                 mutate(&mut self.rename_input);
                 self.enforce_tab_rename_limit();
                 self.notify_for_inline_input_target(InlineInputTarget::RenameTab, cx);
-            }
-            Some(InlineInputTarget::AiInput) => {
-                mutate(self.ai_input_mut());
-                self.notify_for_inline_input_target(InlineInputTarget::AiInput, cx);
-            }
-            Some(InlineInputTarget::AgentSidebar) => {
-                mutate(&mut self.agent_sidebar_input);
-                self.notify_for_inline_input_target(InlineInputTarget::AgentSidebar, cx);
             }
             None => {}
         }
@@ -1571,10 +1539,6 @@ mod tests {
     fn inline_input_notify_policy_matches_overlay_split() {
         assert_eq!(
             TerminalView::inline_input_notify_target_for_target(InlineInputTarget::CommandPalette),
-            InlineInputNotifyTarget::Overlay
-        );
-        assert_eq!(
-            TerminalView::inline_input_notify_target_for_target(InlineInputTarget::AiInput),
             InlineInputNotifyTarget::Overlay
         );
         assert_eq!(

@@ -54,7 +54,6 @@ impl TerminalView {
                 CommandPaletteItemKind::Command(action) => {
                     self.command_palette_shortcut(*action, window)
                 }
-                CommandPaletteItemKind::PluginCommand { .. } => None,
                 CommandPaletteItemKind::Theme(_)
                 | CommandPaletteItemKind::TmuxSessionAttachOrSwitch { .. }
                 | CommandPaletteItemKind::TmuxSessionCreateAndAttach { .. }

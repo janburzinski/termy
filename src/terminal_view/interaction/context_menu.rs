@@ -20,19 +20,15 @@ impl TerminalView {
         Some(buffer_position)
     }
 
-    fn terminal_context_menu_capabilities(
-        &self,
-        cx: &mut Context<Self>,
-    ) -> (bool, bool, bool, bool) {
+    fn terminal_context_menu_capabilities(&self, cx: &mut Context<Self>) -> (bool, bool, bool) {
         let has_selection = self.selected_text().is_some();
         let can_copy = has_selection;
         let can_paste = cx
             .read_from_clipboard()
             .and_then(|item| item.text())
             .is_some();
-        let can_ask_ai = has_selection;
         let can_search_google = has_selection;
-        (can_copy, can_paste, can_ask_ai, can_search_google)
+        (can_copy, can_paste, can_search_google)
     }
 
     fn command_action_for_context_menu_action(
@@ -43,8 +39,7 @@ impl TerminalView {
             termy_native_sdk::ContextMenuAction::Paste => Some(CommandAction::Paste),
             termy_native_sdk::ContextMenuAction::OpenSearch => Some(CommandAction::OpenSearch),
             termy_native_sdk::ContextMenuAction::CopyBufferPosition => None,
-            termy_native_sdk::ContextMenuAction::AskAi
-            | termy_native_sdk::ContextMenuAction::SearchGoogle => None,
+            termy_native_sdk::ContextMenuAction::SearchGoogle => None,
         }
     }
 
@@ -110,27 +105,8 @@ impl TerminalView {
             return;
         }
 
-        if action == termy_native_sdk::ContextMenuAction::AskAi {
-            self.execute_terminal_context_menu_ask_ai(cx);
-            return;
-        }
-
         if action == termy_native_sdk::ContextMenuAction::SearchGoogle {
             self.execute_terminal_context_menu_search_google(cx);
-        }
-    }
-
-    pub(in super::super) fn execute_terminal_context_menu_ask_ai(
-        &mut self,
-        cx: &mut Context<Self>,
-    ) {
-        let selected = self.selected_text();
-        let _ = self.close_terminal_context_menu(cx);
-        self.open_ai_input(cx);
-        if let Some(selected) = selected {
-            self.ai_input_mut().set_text(selected);
-            self.reset_cursor_blink_phase();
-            cx.notify();
         }
     }
 
@@ -161,7 +137,6 @@ impl TerminalView {
         buffer_position_label: Option<String>,
         can_copy: bool,
         can_paste: bool,
-        can_ask_ai: bool,
         can_search_google: bool,
         cx: &mut Context<Self>,
     ) {
@@ -171,7 +146,6 @@ impl TerminalView {
                     buffer_position_label,
                     can_copy,
                     can_paste,
-                    can_ask_ai,
                     can_search_google,
                 )
             })
@@ -195,15 +169,13 @@ impl TerminalView {
         position: gpui::Point<Pixels>,
         cx: &mut Context<Self>,
     ) {
-        let (can_copy, can_paste, can_ask_ai, can_search_google) =
-            self.terminal_context_menu_capabilities(cx);
+        let (can_copy, can_paste, can_search_google) = self.terminal_context_menu_capabilities(cx);
         let buffer_position = self.terminal_context_menu_buffer_position(position);
         let state = TerminalContextMenuState {
             anchor_position: position,
             buffer_position,
             can_copy,
             can_paste,
-            can_ask_ai,
             can_search_google,
         };
         #[cfg(target_os = "linux")]
@@ -225,7 +197,6 @@ impl TerminalView {
                 buffer_position_label,
                 can_copy,
                 can_paste,
-                can_ask_ai,
                 can_search_google,
                 cx,
             );
@@ -260,12 +231,6 @@ mod tests {
         assert_eq!(
             TerminalView::command_action_for_context_menu_action(
                 termy_native_sdk::ContextMenuAction::CopyBufferPosition
-            ),
-            None
-        );
-        assert_eq!(
-            TerminalView::command_action_for_context_menu_action(
-                termy_native_sdk::ContextMenuAction::AskAi
             ),
             None
         );

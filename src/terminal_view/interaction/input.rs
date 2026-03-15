@@ -315,16 +315,6 @@ impl TerminalView {
             return;
         }
 
-        if self.ai_input_open {
-            self.handle_ai_input_key_down(key, cx);
-            return;
-        }
-
-        if self.agent_sidebar_input_active {
-            self.handle_agent_sidebar_key_down(key, cx);
-            return;
-        }
-
         if self.renaming_tab.is_some() {
             match key {
                 "enter" => {

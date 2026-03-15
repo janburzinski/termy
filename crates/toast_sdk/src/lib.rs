@@ -20,6 +20,7 @@ pub struct Toast {
     pub id: u64,
     pub kind: ToastKind,
     pub message: String,
+    pub action_label: Option<String>,
     pub created_at: Instant,
     pub paused_at: Option<Instant>,
     pub paused_total: Duration,
@@ -103,6 +104,7 @@ impl ToastManager {
             id,
             kind: request.kind,
             message: request.message,
+            action_label: None,
             created_at: Instant::now(),
             paused_at: None,
             paused_total: Duration::ZERO,
@@ -180,6 +182,7 @@ impl ToastManager {
             id: request.id,
             kind: request.kind,
             message: request.message,
+            action_label: request.action_label,
             created_at: Instant::now(),
             paused_at: None,
             paused_total: Duration::ZERO,
@@ -294,6 +297,16 @@ pub fn enqueue_toast_with_id(
     message: impl Into<String>,
     duration: Option<Duration>,
 ) -> u64 {
+    enqueue_actionable_toast_with_id(kind, message, duration, None)
+}
+
+/// Enqueue a toast with an action button label, returning its ID.
+pub fn enqueue_actionable_toast_with_id(
+    kind: ToastKind,
+    message: impl Into<String>,
+    duration: Option<Duration>,
+    action_label: Option<String>,
+) -> u64 {
     static NEXT_PENDING_ID: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
     let id = NEXT_PENDING_ID.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
 
@@ -301,6 +314,7 @@ pub fn enqueue_toast_with_id(
         id,
         kind,
         message: message.into(),
+        action_label,
         duration: duration.unwrap_or(DEFAULT_TOAST_DURATION),
     };
 
@@ -327,6 +341,7 @@ pub struct ToastRequestWithId {
     pub id: u64,
     pub kind: ToastKind,
     pub message: String,
+    pub action_label: Option<String>,
     pub duration: Duration,
 }
 

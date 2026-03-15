@@ -189,23 +189,7 @@ impl TerminalView {
         install_cli_available: bool,
         tmux_enabled: bool,
     ) -> Vec<CommandPaletteItem> {
-        let mut items =
-            Self::command_palette_core_command_items_for_state(install_cli_available, tmux_enabled);
-
-        if let Ok(plugin_entries) = crate::plugins::command_palette_entries() {
-            items.extend(plugin_entries.into_iter().map(|entry| {
-                CommandPaletteItem::plugin_command(
-                    entry.title,
-                    entry.keywords,
-                    entry.plugin_id,
-                    entry.command_id,
-                    entry.enabled,
-                    (!entry.enabled).then_some("plugin not running"),
-                )
-            }));
-        }
-
-        items
+        Self::command_palette_core_command_items_for_state(install_cli_available, tmux_enabled)
     }
 
     fn command_palette_items_for_mode(&self, mode: CommandPaletteMode) -> Vec<CommandPaletteItem> {
@@ -895,21 +879,6 @@ impl TerminalView {
                 }
                 self.execute_command_palette_action(action, window, cx)
             }
-            CommandPaletteItemKind::PluginCommand {
-                plugin_id,
-                command_id,
-            } => {
-                if !item.enabled {
-                    termy_toast::info("Start the plugin to use this command");
-                    self.notify_overlay(cx);
-                    return;
-                }
-                self.execute_plugin_command_palette_action(
-                    plugin_id.as_str(),
-                    command_id.as_str(),
-                    cx,
-                );
-            }
             CommandPaletteItemKind::Theme(theme_id) => {
                 self.select_theme_from_palette(theme_id.as_str(), cx)
             }
@@ -1440,28 +1409,7 @@ impl TerminalView {
             | CommandAction::OpenSettings
             | CommandAction::MinimizeWindow
             | CommandAction::InstallCli
-            | CommandAction::ToggleAiInput
-            | CommandAction::ToggleAgentSidebar
             | CommandAction::ToggleVerticalTabSidebar => {}
-        }
-    }
-
-    fn execute_plugin_command_palette_action(
-        &mut self,
-        plugin_id: &str,
-        command_id: &str,
-        cx: &mut Context<Self>,
-    ) {
-        self.close_command_palette(cx);
-        match crate::plugins::invoke_plugin_command(plugin_id, command_id) {
-            Ok(()) => {
-                termy_toast::success(format!("Ran {}", command_id));
-                self.notify_overlay(cx);
-            }
-            Err(error) => {
-                termy_toast::error(error);
-                self.notify_overlay(cx);
-            }
         }
     }
 

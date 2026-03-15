@@ -10,6 +10,7 @@ use fs4::fs_std::FileExt;
 use termy_config_core::{
     ColorSettingId, ColorSettingUpdate, Rgb8, RootSettingId, TaskConfig, apply_color_updates,
     color_setting_from_key, color_setting_spec, parse_theme_id, prettify_config_contents,
+    remove_raw_root_key as remove_raw_root_key_entry,
     remove_root_setting as remove_root_setting_entry, replace_keybind_lines, upsert_root_setting,
 };
 
@@ -99,6 +100,11 @@ pub fn set_root_setting(setting: RootSettingId, value: &str) -> Result<(), Strin
 
 pub fn remove_root_setting(setting: RootSettingId) -> Result<(), String> {
     update_config_contents(|existing| Ok((remove_root_setting_entry(existing, setting), ())))
+}
+
+pub fn remove_raw_root_key_from_config(key: &str) -> Result<(), String> {
+    let key = key.to_string();
+    update_config_contents(move |existing| Ok((remove_raw_root_key_entry(existing, &key), ())))
 }
 
 pub fn set_theme_in_config(theme_id: &str) -> Result<String, String> {

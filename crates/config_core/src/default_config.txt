@@ -13,12 +13,6 @@ native_tab_persistence = false
 native_layout_autosave = false
 # Replay saved buffer text when restoring native layouts
 native_buffer_persistence = false
-# Allow the experimental agent sidebar to be toggled with the keyboard shortcut
-agent_sidebar_enabled = false
-# Saved width for the experimental agent sidebar in pixels
-agent_sidebar_width = 320
-# Show the Plugins section in Settings
-show_plugins_tab = false
 # Show FPS, CPU, and memory in the terminal corner
 show_debug_overlay = false
 # tmux executable path or binary name
@@ -59,6 +53,8 @@ vertical_tabs = false
 vertical_tabs_width = 220
 # Start vertical tabs in the collapsed state
 vertical_tabs_minimized = false
+# Hide the tab bar when only one tab is open
+auto_hide_tabbar = true
 # Show or hide the termy branding in the titlebar
 show_termy_in_titlebar = true
 # Executable used for new sessions
@@ -107,14 +103,6 @@ copy_on_select = false
 copy_on_select_toast = true
 # Show shortcut badges in command palette rows
 command_palette_show_keybinds = true
-# Provider used for AI input and model listing
-ai_provider = openai
-# API key for OpenAI integration
-openai_api_key = none
-# API key for Google Gemini integration
-gemini_api_key = none
-# Model used for AI input requests
-openai_model = none
 
 # Keybindings (repeatable)
 # keybind = cmd-p=toggle_command_palette

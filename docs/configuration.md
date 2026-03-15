@@ -208,6 +208,11 @@ Tmux integration is an add-on. Set `tmux_enabled = true` to start in tmux mode b
 - Start vertical tabs in the collapsed state
 - Group: `TAB STRIP`
 
+`auto_hide_tabbar`
+- Default: `true`
+- Hide the tab bar when only one tab is open
+- Group: `TAB STRIP`
+
 `show_termy_in_titlebar`
 - Default: `true`
 - Show or hide the termy branding in the titlebar
@@ -234,21 +239,6 @@ Tmux integration is an add-on. Set `tmux_enabled = true` to start in tmux mode b
 - Default: `false`
 - Replay saved buffer text when restoring native layouts
 - Group: `STARTUP`
-
-`agent_sidebar_enabled`
-- Default: `false`
-- Allow the experimental agent sidebar to be toggled with the keyboard shortcut
-- Group: `UI`
-
-`agent_sidebar_width`
-- Default: `320`
-- Saved width for the experimental agent sidebar in pixels
-- Group: `UI`
-
-`show_plugins_tab`
-- Default: `false`
-- Show the Plugins section in Settings
-- Group: `UI`
 
 `show_debug_overlay`
 - Default: `false`
@@ -285,29 +275,6 @@ Tmux integration is an add-on. Set `tmux_enabled = true` to start in tmux mode b
 - Default: `820`
 - Default startup window height in pixels
 - Group: `WINDOW`
-
-`ai_provider`
-- Default: `openai`
-- Provider used for AI input and model listing
-- Group: `AI`
-
-`openai_api_key`
-- Default: unset
-- Aliases: `openai_key`
-- API key for OpenAI integration
-- Group: `AI`
-
-`gemini_api_key`
-- Default: unset
-- Aliases: `google_ai_api_key`
-- API key for Google Gemini integration
-- Group: `AI`
-
-`openai_model`
-- Default: unset
-- Aliases: `ai_model`
-- Model used for AI input requests
-- Group: `AI`
 
 ## Keybindings
 

@@ -6,10 +6,11 @@ mod preview;
 use crate::theme_store;
 use std::time::Duration;
 use std::{
-    collections::HashSet,
+    collections::{HashMap, HashSet},
     fs,
     hash::{DefaultHasher, Hash, Hasher},
     path::{Path, PathBuf},
+    sync::{LazyLock, Mutex},
 };
 
 pub use error::ConfigIoError;
@@ -94,16 +95,69 @@ pub fn summarize_parse_diagnostics(diagnostics: &[ConfigDiagnostic]) -> Option<S
     ))
 }
 
+/// Maps toast ID → list of raw config keys to remove when "Fix" is clicked.
+static PENDING_FIXES: LazyLock<Mutex<HashMap<u64, Vec<String>>>> =
+    LazyLock::new(|| Mutex::new(HashMap::new()));
+
 pub fn show_parse_diagnostics_toast(diagnostics: &[ConfigDiagnostic]) {
     let Some(summary) = summarize_parse_diagnostics(diagnostics) else {
         return;
     };
 
-    termy_toast::enqueue_toast(
+    // Collect fixable keys (unknown/duplicate root keys can simply be removed).
+    let fixable_keys: Vec<String> = diagnostics
+        .iter()
+        .filter(|d| {
+            matches!(
+                d.kind,
+                ConfigDiagnosticKind::UnknownRootKey | ConfigDiagnosticKind::DuplicateRootKey
+            )
+        })
+        .filter_map(|d| {
+            // The message format is "Unknown root key 'key'" — extract the key.
+            d.message
+                .strip_prefix("Unknown root key '")
+                .or_else(|| d.message.strip_prefix("Duplicate root key '"))
+                .and_then(|s| s.strip_suffix('\''))
+                .map(|s| s.to_string())
+        })
+        .collect();
+
+    let action_label = if fixable_keys.is_empty() {
+        None
+    } else {
+        Some("Fix".to_string())
+    };
+
+    let toast_id = termy_toast::enqueue_actionable_toast_with_id(
         termy_toast::ToastKind::Warning,
         summary,
         Some(Duration::from_secs(10)),
+        action_label,
     );
+
+    if !fixable_keys.is_empty() {
+        let mut fixes = PENDING_FIXES.lock().expect("pending fixes lock");
+        fixes.insert(toast_id, fixable_keys);
+    }
+}
+
+/// Execute the fix registered for a toast (remove unknown/duplicate keys from config).
+/// Returns true if any fix was applied.
+pub fn execute_fix_for_toast(toast_id: u64) -> bool {
+    let keys = {
+        let mut fixes = PENDING_FIXES.lock().expect("pending fixes lock");
+        fixes.remove(&toast_id)
+    };
+    let Some(keys) = keys else {
+        return false;
+    };
+    for key in &keys {
+        if let Err(e) = mutate::remove_raw_root_key_from_config(key) {
+            log::warn!("Failed to fix config key '{}': {}", key, e);
+        }
+    }
+    !keys.is_empty()
 }
 
 // This uses Rust's default SipHash-based hasher and is only for in-process

@@ -946,32 +946,6 @@ define_commands!(
         ))
     ),
     (
-        ToggleAiInput,
-        TERMINAL_CONTEXT,
-        Some(palette(
-            "AI Input",
-            "ai assistant chat prompt",
-            CommandPaletteVisibility::Always
-        )),
-        None
-    ),
-    (
-        ToggleAgentSidebar,
-        TERMINAL_CONTEXT,
-        Some(palette(
-            "Toggle Agent Sidebar",
-            "agent sidebar assistant panel right",
-            CommandPaletteVisibility::Always
-        )),
-        Some(menu(
-            MenuRoot::View,
-            0,
-            "Agent Sidebar",
-            MenuVisibility::Always,
-            MenuActionRole::Normal
-        ))
-    ),
-    (
         ToggleVerticalTabSidebar,
         TERMINAL_CONTEXT,
         Some(palette(

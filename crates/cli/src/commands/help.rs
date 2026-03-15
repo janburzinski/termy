@@ -6,8 +6,6 @@ pub fn run() {
     println!("  -help             Show this help message");
     println!("  -list-fonts       List available monospace fonts");
     println!("  -list-keybinds    List all keybindings");
-    println!("  -list-plugins     List discovered plugins");
-    println!("  -plugin-init      Create a starter plugin scaffold");
     println!("  -list-themes      List available themes");
     println!("  -list-colors      Show current theme colors");
     println!("  -list-actions     List available keybind actions");

@@ -245,17 +245,7 @@ pub enum AiProvider {
     Gemini,
 }
 
-impl AiProvider {
-    pub(crate) fn from_str(value: &str) -> Option<Self> {
-        match value.trim().to_ascii_lowercase().as_str() {
-            "openai" | "open_ai" => Some(Self::OpenAi),
-            "gemini" => Some(Self::Gemini),
-            _ => None,
-        }
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, PartialEq, Default)]
 pub struct CustomColors {
     pub foreground: Option<Rgb8>,
     pub background: Option<Rgb8>,
@@ -272,9 +262,6 @@ pub struct AppConfig {
     pub native_tab_persistence: bool,
     pub native_layout_autosave: bool,
     pub native_buffer_persistence: bool,
-    pub agent_sidebar_enabled: bool,
-    pub agent_sidebar_width: f32,
-    pub show_plugins_tab: bool,
     pub show_debug_overlay: bool,
     pub tmux_binary: String,
     pub tmux_show_active_pane_border: bool,
@@ -347,9 +334,6 @@ impl Default for AppConfig {
             native_tab_persistence: false,
             native_layout_autosave: false,
             native_buffer_persistence: false,
-            agent_sidebar_enabled: false,
-            agent_sidebar_width: 320.0,
-            show_plugins_tab: false,
             show_debug_overlay: false,
             tmux_binary: DEFAULT_TMUX_BINARY.to_string(),
             tmux_show_active_pane_border: DEFAULT_TMUX_SHOW_ACTIVE_PANE_BORDER,
