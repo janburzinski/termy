@@ -37,10 +37,6 @@ pub(super) enum EditableField {
     WorkingDirFallback,
     WindowWidth,
     WindowHeight,
-    AiProvider,
-    OpenaiApiKey,
-    GeminiApiKey,
-    OpenaiModel,
     Color(termy_config_core::ColorSettingId),
 }
 
@@ -123,10 +119,8 @@ pub(super) struct FieldSpec {
 
 impl SettingsWindow {
     pub(super) fn is_secret_field(field: EditableField) -> bool {
-        matches!(
-            field,
-            EditableField::OpenaiApiKey | EditableField::GeminiApiKey
-        )
+        let _ = field;
+        false
     }
 
     pub(super) fn parse_tab_title_source_token(
@@ -435,11 +429,7 @@ impl SettingsWindow {
             EditableField::WorkingDirectory
             | EditableField::WorkingDirFallback
             | EditableField::WindowWidth
-            | EditableField::WindowHeight
-            | EditableField::AiProvider
-            | EditableField::OpenaiApiKey
-            | EditableField::GeminiApiKey
-            | EditableField::OpenaiModel => Self::advanced_field_spec(field),
+            | EditableField::WindowHeight => Self::advanced_field_spec(field),
             EditableField::Color(_) => FieldSpec {
                 root_setting: None,
                 codec: FieldCodec::Color,
@@ -760,60 +750,7 @@ impl SettingsWindow {
                 .map(DropdownOption::raw)
                 .collect();
         }
-        if field == EditableField::OpenaiModel {
-            return self.filtered_openai_model_suggestions(query);
-        }
-
         self.filtered_enum_suggestions(field, query)
-    }
-
-    pub(super) fn filtered_openai_model_suggestions(&self, query: &str) -> Vec<DropdownOption> {
-        let trimmed_query = query.trim();
-        let normalized_query = trimmed_query.to_ascii_lowercase();
-        let normalized_compact = Self::normalize_dropdown_query_token(trimmed_query);
-
-        let mut options = self
-            .openai_model_options
-            .iter()
-            .cloned()
-            .map(DropdownOption::raw)
-            .collect::<Vec<_>>();
-
-        if normalized_query.is_empty() {
-            let current_value = self.editable_field_value(EditableField::OpenaiModel);
-            if let Some(index) = options
-                .iter()
-                .position(|option| option.value.eq_ignore_ascii_case(&current_value))
-            {
-                let selected = options.remove(index);
-                options.insert(0, selected);
-            } else if !current_value.trim().is_empty() {
-                options.insert(0, DropdownOption::raw(current_value));
-            }
-            return options;
-        }
-
-        let mut matched = options
-            .into_iter()
-            .filter(|option| {
-                let value_lower = option.value.to_ascii_lowercase();
-                let value_compact = Self::normalize_dropdown_query_token(&option.value);
-                value_lower.contains(&normalized_query)
-                    || (!normalized_compact.is_empty()
-                        && value_compact.contains(&normalized_compact))
-            })
-            .collect::<Vec<_>>();
-
-        if !trimmed_query.is_empty()
-            && !matched.iter().any(|option| {
-                option.value.eq_ignore_ascii_case(trimmed_query)
-                    || Self::normalize_dropdown_query_token(&option.value) == normalized_compact
-            })
-        {
-            matched.insert(0, DropdownOption::raw(trimmed_query.to_string()));
-        }
-
-        matched
     }
 
     pub(super) fn dropdown_display_value(&self, field: EditableField, raw_value: &str) -> String {
@@ -973,25 +910,6 @@ impl SettingsWindow {
             .to_string(),
             EditableField::WindowWidth => format!("{}", self.config.window_width.round() as i32),
             EditableField::WindowHeight => format!("{}", self.config.window_height.round() as i32),
-            EditableField::AiProvider => match self.config.ai_provider {
-                termy_config_core::AiProvider::OpenAi => "openai".to_string(),
-                termy_config_core::AiProvider::Gemini => "gemini".to_string(),
-            },
-            EditableField::OpenaiApiKey => self.config.openai_api_key.clone().unwrap_or_default(),
-            EditableField::GeminiApiKey => self.config.gemini_api_key.clone().unwrap_or_default(),
-            EditableField::OpenaiModel => {
-                self.config
-                    .openai_model
-                    .clone()
-                    .unwrap_or_else(|| match self.config.ai_provider {
-                        termy_config_core::AiProvider::OpenAi => {
-                            termy_openai::DEFAULT_MODEL.to_string()
-                        }
-                        termy_config_core::AiProvider::Gemini => {
-                            termy_gemini::DEFAULT_MODEL.to_string()
-                        }
-                    })
-            }
             EditableField::Color(id) => self
                 .custom_color_for_id(id)
                 .map(|rgb| format!("#{:02x}{:02x}{:02x}", rgb.r, rgb.g, rgb.b))
@@ -1018,9 +936,6 @@ impl SettingsWindow {
             field,
             self.editable_field_value(field),
         ));
-        if field == EditableField::OpenaiModel {
-            self.refresh_openai_model_options(false, cx);
-        }
         self.focus_handle.focus(window, cx);
         cx.notify();
     }
@@ -1283,10 +1198,6 @@ mod tests {
             EditableField::WorkingDirFallback,
             EditableField::WindowWidth,
             EditableField::WindowHeight,
-            EditableField::AiProvider,
-            EditableField::OpenaiApiKey,
-            EditableField::GeminiApiKey,
-            EditableField::OpenaiModel,
             EditableField::Color(termy_config_core::ColorSettingId::Foreground),
         ];
 
@@ -1312,7 +1223,6 @@ mod tests {
             EditableField::TabCloseVisibility,
             EditableField::TabWidthMode,
             EditableField::WorkingDirFallback,
-            EditableField::AiProvider,
         ];
 
         for field in enum_fields {

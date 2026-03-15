@@ -1190,85 +1190,15 @@ impl SettingsWindow {
         ];
         let window_group = self.render_settings_group("WINDOW", window_rows);
 
-        let ui_rows = vec![
-            self.render_root_bool_setting_row(
-                "show_debug_overlay",
-                "show_debug_overlay-toggle",
-                RootSettingId::ShowDebugOverlay,
-                show_debug_overlay,
-                "Saved",
-                cx,
-            ),
-        ];
+        let ui_rows = vec![self.render_root_bool_setting_row(
+            "show_debug_overlay",
+            "show_debug_overlay-toggle",
+            RootSettingId::ShowDebugOverlay,
+            show_debug_overlay,
+            "Saved",
+            cx,
+        )];
         let ui_group = self.render_settings_group("UI", ui_rows);
-
-        let ai_provider_meta = Self::setting_metadata_or_fallback("ai_provider");
-        let openai_api_key_meta = Self::setting_metadata_or_fallback("openai_api_key");
-        let gemini_api_key_meta = Self::setting_metadata_or_fallback("gemini_api_key");
-        let openai_model_meta = Self::setting_metadata_or_fallback("openai_model");
-        let ai_provider = self.editable_field_value(EditableField::AiProvider);
-        let (api_key_setting_key, api_key_field, api_key_title, api_key_description, api_key_value) =
-            match self.config.ai_provider {
-                termy_config_core::AiProvider::OpenAi => (
-                    "openai_api_key",
-                    EditableField::OpenaiApiKey,
-                    openai_api_key_meta.title,
-                    openai_api_key_meta.description,
-                    self.config
-                        .openai_api_key
-                        .clone()
-                        .unwrap_or_else(|| "Not configured".to_string()),
-                ),
-                termy_config_core::AiProvider::Gemini => (
-                    "gemini_api_key",
-                    EditableField::GeminiApiKey,
-                    gemini_api_key_meta.title,
-                    gemini_api_key_meta.description,
-                    self.config
-                        .gemini_api_key
-                        .clone()
-                        .unwrap_or_else(|| "Not configured".to_string()),
-                ),
-            };
-        let openai_model =
-            self.config
-                .openai_model
-                .clone()
-                .unwrap_or_else(|| match self.config.ai_provider {
-                    termy_config_core::AiProvider::OpenAi => {
-                        termy_openai::DEFAULT_MODEL.to_string()
-                    }
-                    termy_config_core::AiProvider::Gemini => {
-                        termy_gemini::DEFAULT_MODEL.to_string()
-                    }
-                });
-        let ai_rows = vec![
-            self.render_editable_row(
-                "ai_provider",
-                EditableField::AiProvider,
-                ai_provider_meta.title,
-                ai_provider_meta.description,
-                ai_provider,
-                cx,
-            ),
-            self.render_editable_row(
-                api_key_setting_key,
-                api_key_field,
-                api_key_title,
-                api_key_description,
-                api_key_value,
-                cx,
-            ),
-            self.render_editable_row(
-                "openai_model",
-                EditableField::OpenaiModel,
-                openai_model_meta.title,
-                openai_model_meta.description,
-                openai_model,
-                cx,
-            ),
-        ];
-        let ai_group = self.render_settings_group("AI", ai_rows);
 
         let auto_update = self.config.auto_update;
         let updates_rows = vec![self.render_root_bool_setting_row(
@@ -1343,7 +1273,6 @@ impl SettingsWindow {
             .child(safety_group)
             .child(window_group)
             .child(ui_group)
-            .child(ai_group)
             .child(updates_group)
             .child(config_group)
     }

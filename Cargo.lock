@@ -7356,9 +7356,7 @@ dependencies = [
  "termy_cli_install_core",
  "termy_command_core",
  "termy_config_core",
- "termy_gemini",
  "termy_native_sdk",
- "termy_openai",
  "termy_search",
  "termy_terminal_ui",
  "termy_themes",
@@ -7455,16 +7453,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "termy_gemini"
-version = "0.1.0"
-dependencies = [
- "serde",
- "serde_json",
- "thiserror 2.0.18",
- "ureq",
-]
-
-[[package]]
 name = "termy_native_sdk"
 version = "0.1.0"
 dependencies = [
@@ -7473,16 +7461,6 @@ dependencies = [
  "objc2-app-kit",
  "objc2-foundation",
  "windows 0.61.3",
-]
-
-[[package]]
-name = "termy_openai"
-version = "0.1.0"
-dependencies = [
- "serde",
- "serde_json",
- "thiserror 2.0.18",
- "ureq",
 ]
 
 [[package]]

@@ -38,11 +38,7 @@ impl SettingsWindow {
             EditableField::WorkingDirectory
             | EditableField::WorkingDirFallback
             | EditableField::WindowWidth
-            | EditableField::WindowHeight
-            | EditableField::AiProvider
-            | EditableField::OpenaiApiKey
-            | EditableField::GeminiApiKey
-            | EditableField::OpenaiModel => self.apply_advanced_field(field, value),
+            | EditableField::WindowHeight => self.apply_advanced_field(field, value),
             EditableField::Color(id) => self.apply_color_field(id, value),
         }
     }
