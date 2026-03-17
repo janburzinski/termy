@@ -9435,8 +9435,13 @@ name = "xtask"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "roxmltree",
+ "serde",
+ "serde_json",
+ "tempfile",
  "termy_command_core",
  "termy_config_core",
+ "termy_terminal_ui",
 ]
 
 [[package]]
