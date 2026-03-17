@@ -212,7 +212,7 @@ impl TerminalQueryColors {
             value if value == NamedColor::DimMagenta as usize => Some(self.ansi[5]),
             value if value == NamedColor::DimCyan as usize => Some(self.ansi[6]),
             value if value == NamedColor::DimWhite as usize => Some(self.ansi[7]),
-            _ => Some(self.foreground),
+            _ => None,
         }
     }
 }
@@ -1729,6 +1729,20 @@ mod tests {
         );
 
         assert_eq!(response, Some(b"\x1b]12;rgb:ab/cd/ef\x1b\\".to_vec()));
+    }
+
+    #[test]
+    fn terminal_query_response_bytes_ignores_unknown_color_queries() {
+        let response = terminal_query_response_bytes(
+            &AlacEvent::ColorRequest(
+                usize::MAX,
+                Arc::new(|color| format!("\x1b]4;999;rgb:{:02x}/{:02x}/{:02x}\x1b\\", color.r, color.g, color.b)),
+            ),
+            test_terminal_size(),
+            &TerminalQueryColors::default(),
+        );
+
+        assert_eq!(response, None);
     }
 
     #[test]
