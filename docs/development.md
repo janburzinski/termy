@@ -21,7 +21,10 @@ Note:
 
 ## Render benchmarks
 
-Run the automated real-window render benchmark compare:
+Prerequisites: macOS with `xctrace` / Activity Monitor installed. This harness
+is not supported on Linux or Windows.
+
+Run the automated real-window render benchmark compare on macOS:
 
 ```sh
 cargo run -p xtask -- benchmark-compare \

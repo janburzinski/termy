@@ -867,8 +867,10 @@ fn percentile_millis(samples_micros: &[u32], numerator: usize, denominator: usiz
     let Some(last_index) = samples_micros.len().checked_sub(1) else {
         return 0.0;
     };
-    let index =
-        (last_index.saturating_mul(numerator) + denominator.saturating_sub(1)) / denominator;
+    let rank = (samples_micros.len().saturating_mul(numerator)
+        + denominator.saturating_sub(1))
+        / denominator;
+    let index = rank.saturating_sub(1).min(last_index);
     samples_micros[index] as f32 / 1000.0
 }
 
@@ -3087,6 +3089,15 @@ mod tests {
         assert!(!TerminalView::native_exit_should_quit_app(1, 2));
         assert!(!TerminalView::native_exit_should_quit_app(2, 1));
         assert!(!TerminalView::native_exit_should_quit_app(0, 0));
+    }
+
+    #[test]
+    fn percentile_millis_uses_full_length_rank() {
+        let samples: Vec<u32> = (1..=100).collect();
+
+        assert_eq!(percentile_millis(&samples, 50, 100), 0.050);
+        assert_eq!(percentile_millis(&samples, 95, 100), 0.095);
+        assert_eq!(percentile_millis(&samples, 99, 100), 0.099);
     }
 
     #[cfg(debug_assertions)]
