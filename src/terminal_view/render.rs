@@ -1960,10 +1960,11 @@ impl TerminalView {
             let frame_p50_ms = self.debug_overlay_stats.frame_p50_ms;
             let frame_p95_ms = self.debug_overlay_stats.frame_p95_ms;
             let frame_p99_ms = self.debug_overlay_stats.frame_p99_ms;
-            let view_wake_signals = self.debug_overlay_stats.view_wake_signals;
             let terminal_event_drain_passes = self.debug_overlay_stats.terminal_event_drain_passes;
             let terminal_redraws = self.debug_overlay_stats.terminal_redraws;
             let alt_screen_fallback_redraws = self.debug_overlay_stats.alt_screen_fallback_redraws;
+            #[cfg(debug_assertions)]
+            let view_wake_signals = self.debug_overlay_stats.view_wake_signals;
             #[cfg(debug_assertions)]
             let runtime_wakeups = self.debug_overlay_stats.runtime_wakeups;
             #[cfg(target_os = "macos")]
