@@ -2490,6 +2490,7 @@ impl Render for TerminalView {
         let hidden_titlebar_branding = Self::should_render_hidden_titlebar_branding(
             self.auto_hide_tabbar,
             self.tabs.len(),
+            self.tab_bar_visibility,
             self.show_termy_in_titlebar,
         )
             .then(|| {
@@ -2743,6 +2744,7 @@ impl Render for TerminalView {
                     .when(self.install_cli_available(), |s| {
                         s.on_action(cx.listener(Self::handle_install_cli_action))
                     })
+                    .on_action(cx.listener(Self::handle_toggle_tab_bar_visibility_action))
                     .on_action(cx.listener(Self::handle_toggle_vertical_tab_sidebar_action))
                     .on_action(cx.listener(Self::handle_inline_backspace_action))
                     .on_action(cx.listener(Self::handle_inline_delete_action))

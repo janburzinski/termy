@@ -1409,6 +1409,7 @@ impl TerminalView {
             | CommandAction::OpenSettings
             | CommandAction::MinimizeWindow
             | CommandAction::InstallCli
+            | CommandAction::ToggleTabBarVisibility
             | CommandAction::ToggleVerticalTabSidebar => {}
         }
     }

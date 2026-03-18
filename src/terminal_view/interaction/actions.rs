@@ -127,6 +127,16 @@ impl TerminalView {
                 }
                 cx.notify();
             }
+            CommandAction::ToggleTabBarVisibility => {
+                let next_visibility = if self.should_render_tab_strip_chrome() {
+                    TabBarVisibility::ForceHidden
+                } else {
+                    TabBarVisibility::ForceVisible
+                };
+                if self.set_tab_bar_visibility(next_visibility) {
+                    cx.notify();
+                }
+            }
             _ if shortcuts_suspended => {}
             CommandAction::OpenConfig
             | CommandAction::PrettifyConfig
@@ -275,6 +285,15 @@ impl TerminalView {
         cx: &mut Context<Self>,
     ) {
         self.execute_command_action(CommandAction::ToggleVerticalTabSidebar, true, window, cx);
+    }
+
+    pub(in super::super) fn handle_toggle_tab_bar_visibility_action(
+        &mut self,
+        _: &commands::ToggleTabBarVisibility,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.execute_command_action(CommandAction::ToggleTabBarVisibility, true, window, cx);
     }
 
     pub(in super::super) fn handle_new_tab_action(

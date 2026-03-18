@@ -21,38 +21,94 @@ mod tests {
     use super::*;
 
     #[test]
-    fn tab_strip_chrome_visible_matches_auto_hide_policy() {
-        assert!(!TerminalView::tab_strip_chrome_visible(true, 1));
-        assert!(!TerminalView::tab_strip_chrome_visible(true, 0));
-        assert!(TerminalView::tab_strip_chrome_visible(false, 1));
-        assert!(TerminalView::tab_strip_chrome_visible(true, 2));
+    fn tab_strip_chrome_visible_follows_auto_hide_policy_by_default() {
+        assert!(!TerminalView::tab_strip_chrome_visible(
+            true,
+            1,
+            TabBarVisibility::FollowConfig
+        ));
+        assert!(!TerminalView::tab_strip_chrome_visible(
+            true,
+            0,
+            TabBarVisibility::FollowConfig
+        ));
+        assert!(TerminalView::tab_strip_chrome_visible(
+            false,
+            1,
+            TabBarVisibility::FollowConfig
+        ));
+        assert!(TerminalView::tab_strip_chrome_visible(
+            true,
+            2,
+            TabBarVisibility::FollowConfig
+        ));
+    }
+
+    #[test]
+    fn tab_strip_chrome_visible_force_hidden_overrides_visible_tab_strip() {
+        assert!(!TerminalView::tab_strip_chrome_visible(
+            false,
+            3,
+            TabBarVisibility::ForceHidden
+        ));
+    }
+
+    #[test]
+    fn tab_strip_chrome_visible_force_visible_overrides_hidden_single_tab_strip() {
+        assert!(TerminalView::tab_strip_chrome_visible(
+            true,
+            1,
+            TabBarVisibility::ForceVisible
+        ));
     }
 
     #[test]
     fn hidden_titlebar_branding_shows_when_auto_hide_hides_single_tab_chrome() {
         assert!(TerminalView::should_render_hidden_titlebar_branding(
-            true, 1, true
+            true,
+            1,
+            TabBarVisibility::FollowConfig,
+            true
         ));
     }
 
     #[test]
     fn hidden_titlebar_branding_shows_when_auto_hide_hides_empty_tab_chrome() {
         assert!(TerminalView::should_render_hidden_titlebar_branding(
-            true, 0, true
+            true,
+            0,
+            TabBarVisibility::FollowConfig,
+            true
         ));
     }
 
     #[test]
     fn hidden_titlebar_branding_hides_when_branding_is_disabled() {
         assert!(!TerminalView::should_render_hidden_titlebar_branding(
-            true, 1, false
+            true,
+            1,
+            TabBarVisibility::FollowConfig,
+            false
         ));
     }
 
     #[test]
     fn hidden_titlebar_branding_hides_when_tab_strip_chrome_is_visible() {
         assert!(!TerminalView::should_render_hidden_titlebar_branding(
-            false, 1, true
+            false,
+            1,
+            TabBarVisibility::FollowConfig,
+            true
+        ));
+    }
+
+    #[test]
+    fn hidden_titlebar_branding_shows_when_tab_strip_is_force_hidden() {
+        assert!(TerminalView::should_render_hidden_titlebar_branding(
+            false,
+            3,
+            TabBarVisibility::ForceHidden,
+            true
         ));
     }
 }
@@ -105,20 +161,34 @@ impl TerminalView {
         title.chars().next().unwrap_or('•').to_string()
     }
 
-    pub(crate) fn tab_strip_chrome_visible(auto_hide_tabbar: bool, tab_count: usize) -> bool {
-        !auto_hide_tabbar || tab_count > 1
+    pub(crate) fn tab_strip_chrome_visible(
+        auto_hide_tabbar: bool,
+        tab_count: usize,
+        visibility: TabBarVisibility,
+    ) -> bool {
+        match visibility {
+            TabBarVisibility::FollowConfig => !auto_hide_tabbar || tab_count > 1,
+            TabBarVisibility::ForceVisible => true,
+            TabBarVisibility::ForceHidden => false,
+        }
     }
 
     pub(crate) fn should_render_hidden_titlebar_branding(
         auto_hide_tabbar: bool,
         tab_count: usize,
+        visibility: TabBarVisibility,
         show_termy_in_titlebar: bool,
     ) -> bool {
-        !Self::tab_strip_chrome_visible(auto_hide_tabbar, tab_count) && show_termy_in_titlebar
+        !Self::tab_strip_chrome_visible(auto_hide_tabbar, tab_count, visibility)
+            && show_termy_in_titlebar
     }
 
     pub(crate) fn should_render_tab_strip_chrome(&self) -> bool {
-        Self::tab_strip_chrome_visible(self.auto_hide_tabbar, self.tabs.len())
+        Self::tab_strip_chrome_visible(
+            self.auto_hide_tabbar,
+            self.tabs.len(),
+            self.tab_bar_visibility,
+        )
     }
 
     pub(super) fn build_tab_strip_render_state(

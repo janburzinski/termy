@@ -250,6 +250,7 @@ Related UI option:
 - `toggle_search_case_sensitive`
 - `toggle_search_regex`
 - `install_cli`
+- `toggle_tab_bar_visibility`
 - `toggle_vertical_tab_sidebar`
 
 ## Customization Examples
