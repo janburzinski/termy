@@ -1,4 +1,5 @@
 use crate::colors::TerminalColors;
+use crate::chrome_style::ChromeContrastProfile;
 use crate::commands::{self, CommandAction};
 use crate::config::{
     self, AppConfig, CursorStyle as AppCursorStyle, PaneFocusEffect, TabCloseVisibility,
@@ -1152,31 +1153,24 @@ fn pane_focus_preset(effect: PaneFocusEffect) -> Option<PaneFocusPreset> {
 struct OverlayStyleBuilder<'a> {
     colors: &'a TerminalColors,
     background_opacity: f32,
+    contrast_profile: ChromeContrastProfile,
 }
 
 impl<'a> OverlayStyleBuilder<'a> {
-    fn new(colors: &'a TerminalColors, background_opacity: f32) -> Self {
+    fn new(
+        colors: &'a TerminalColors,
+        background_opacity: f32,
+        contrast_profile: ChromeContrastProfile,
+    ) -> Self {
         Self {
             colors,
             background_opacity,
+            contrast_profile,
         }
     }
 
     fn panel_background(self, base_alpha: f32) -> gpui::Rgba {
         let alpha = adaptive_overlay_panel_alpha_for_opacity(base_alpha, self.background_opacity);
-        self.with_alpha(self.colors.background, alpha)
-    }
-
-    fn panel_background_with_floor(
-        self,
-        base_alpha: f32,
-        translucent_floor_alpha: f32,
-    ) -> gpui::Rgba {
-        let alpha = adaptive_overlay_panel_alpha_with_floor_for_opacity(
-            base_alpha,
-            self.background_opacity,
-            translucent_floor_alpha,
-        );
         self.with_alpha(self.colors.background, alpha)
     }
 
@@ -1187,6 +1181,44 @@ impl<'a> OverlayStyleBuilder<'a> {
 
     fn panel_foreground(self, base_alpha: f32) -> gpui::Rgba {
         let alpha = adaptive_overlay_panel_alpha_for_opacity(base_alpha, self.background_opacity);
+        self.with_alpha(self.colors.foreground, alpha)
+    }
+
+    fn chrome_panel_background(self, base_alpha: f32) -> gpui::Rgba {
+        let alpha = adaptive_overlay_panel_alpha_for_opacity(
+            self.contrast_profile.panel_surface_alpha(base_alpha),
+            self.background_opacity,
+        );
+        self.with_alpha(self.colors.background, alpha)
+    }
+
+    fn chrome_panel_background_with_floor(
+        self,
+        base_alpha: f32,
+        translucent_floor_alpha: f32,
+    ) -> gpui::Rgba {
+        let alpha = adaptive_overlay_panel_alpha_with_floor_for_opacity(
+            self.contrast_profile.panel_surface_alpha(base_alpha),
+            self.background_opacity,
+            self.contrast_profile
+                .panel_surface_alpha(translucent_floor_alpha),
+        );
+        self.with_alpha(self.colors.background, alpha)
+    }
+
+    fn chrome_panel_cursor(self, base_alpha: f32) -> gpui::Rgba {
+        let alpha = adaptive_overlay_panel_alpha_for_opacity(
+            self.contrast_profile.panel_accent_alpha(base_alpha),
+            self.background_opacity,
+        );
+        self.with_alpha(self.colors.cursor, alpha)
+    }
+
+    fn chrome_panel_neutral(self, base_alpha: f32) -> gpui::Rgba {
+        let alpha = adaptive_overlay_panel_alpha_for_opacity(
+            self.contrast_profile.panel_neutral_alpha(base_alpha),
+            self.background_opacity,
+        );
         self.with_alpha(self.colors.foreground, alpha)
     }
 
@@ -1262,6 +1294,7 @@ pub struct TerminalView {
     cursor_blink: bool,
     cursor_blink_visible: bool,
     background_opacity: f32,
+    chrome_contrast: bool,
     background_opacity_cells: bool,
     preview_background_opacity: Option<config::BackgroundOpacityPreview>,
     background_blur: bool,
@@ -1765,6 +1798,31 @@ impl TerminalView {
         scaled_chrome_alpha_for_opacity(base_alpha, self.effective_background_opacity())
     }
 
+    fn chrome_contrast_profile(&self) -> ChromeContrastProfile {
+        ChromeContrastProfile::from_enabled(self.chrome_contrast)
+    }
+
+    fn scaled_chrome_surface_alpha(&self, base_alpha: f32) -> f32 {
+        scaled_chrome_alpha_for_opacity(
+            self.chrome_contrast_profile().surface_alpha(base_alpha),
+            self.effective_background_opacity(),
+        )
+    }
+
+    fn scaled_chrome_neutral_border_alpha(&self, base_alpha: f32) -> f32 {
+        scaled_chrome_alpha_for_opacity(
+            self.chrome_contrast_profile().neutral_border_alpha(base_alpha),
+            self.effective_background_opacity(),
+        )
+    }
+
+    fn scaled_chrome_accent_alpha(&self, base_alpha: f32) -> f32 {
+        scaled_chrome_alpha_for_opacity(
+            self.chrome_contrast_profile().accent_alpha(base_alpha),
+            self.effective_background_opacity(),
+        )
+    }
+
     fn effective_background_opacity(&self) -> f32 {
         config::effective_background_opacity(
             self.background_opacity,
@@ -1897,7 +1955,11 @@ impl TerminalView {
     }
 
     fn overlay_style(&self) -> OverlayStyleBuilder<'_> {
-        OverlayStyleBuilder::new(&self.colors, self.effective_background_opacity())
+        OverlayStyleBuilder::new(
+            &self.colors,
+            self.effective_background_opacity(),
+            self.chrome_contrast_profile(),
+        )
     }
 
     fn ensure_overlay_view(&mut self, cx: &mut Context<Self>) -> Entity<TerminalOverlayView> {
@@ -2493,6 +2555,7 @@ impl TerminalView {
             cursor_blink: config.cursor_blink,
             cursor_blink_visible: true,
             background_opacity: config.background_opacity,
+            chrome_contrast: config.chrome_contrast,
             background_opacity_cells: config.background_opacity_cells,
             preview_background_opacity: config::current_background_opacity_preview(),
             background_blur: config.background_blur,
@@ -2816,6 +2879,7 @@ impl TerminalView {
             self.mark_tab_strip_layout_dirty();
         }
         self.background_opacity = config.background_opacity;
+        self.chrome_contrast = config.chrome_contrast;
         self.background_opacity_cells = config.background_opacity_cells;
         self.preview_background_opacity = config::synced_background_opacity_preview(
             self.background_opacity,

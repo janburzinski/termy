@@ -9,11 +9,29 @@ impl SettingsWindow {
         (base_alpha * self.background_opacity_factor()).clamp(0.0, 1.0)
     }
 
-    pub(super) fn adaptive_panel_alpha(&self, base_alpha: f32) -> f32 {
-        let floor = base_alpha * SETTINGS_OVERLAY_PANEL_ALPHA_FLOOR_RATIO;
-        self.scaled_background_alpha(base_alpha)
+    pub(super) fn chrome_contrast_profile(&self) -> crate::chrome_style::ChromeContrastProfile {
+        crate::chrome_style::ChromeContrastProfile::from_enabled(self.config.chrome_contrast)
+    }
+
+    fn adaptive_chrome_panel_alpha(&self, base_alpha: f32) -> f32 {
+        let profile = self.chrome_contrast_profile();
+        let scaled_alpha = profile.panel_surface_alpha(base_alpha);
+        let floor = scaled_alpha * SETTINGS_OVERLAY_PANEL_ALPHA_FLOOR_RATIO;
+        self.scaled_background_alpha(scaled_alpha)
             .max(floor)
             .clamp(0.0, 1.0)
+    }
+
+    fn scaled_chrome_surface_alpha(&self, base_alpha: f32) -> f32 {
+        self.scaled_background_alpha(self.chrome_contrast_profile().surface_alpha(base_alpha))
+    }
+
+    fn scaled_chrome_neutral_alpha(&self, base_alpha: f32) -> f32 {
+        self.scaled_background_alpha(self.chrome_contrast_profile().panel_neutral_alpha(base_alpha))
+    }
+
+    fn scaled_chrome_accent_alpha(&self, base_alpha: f32) -> f32 {
+        self.scaled_background_alpha(self.chrome_contrast_profile().panel_accent_alpha(base_alpha))
     }
 
     pub(super) fn sync_window_background_appearance(&mut self, window: &mut Window) {
@@ -35,31 +53,31 @@ impl SettingsWindow {
 
     pub(super) fn bg_secondary(&self) -> Rgba {
         let mut c = self.colors.background;
-        c.a = self.adaptive_panel_alpha(0.7);
+        c.a = self.adaptive_chrome_panel_alpha(0.7);
         c
     }
 
     pub(super) fn bg_card(&self) -> Rgba {
         let mut c = self.colors.background;
-        c.a = self.adaptive_panel_alpha(0.5);
+        c.a = self.adaptive_chrome_panel_alpha(0.5);
         c
     }
 
     pub(super) fn bg_input(&self) -> Rgba {
         let mut c = self.colors.background;
-        c.a = self.adaptive_panel_alpha(0.36);
+        c.a = self.adaptive_chrome_panel_alpha(0.36);
         c
     }
 
     pub(super) fn bg_hover(&self) -> Rgba {
         let mut c = self.colors.foreground;
-        c.a = 0.1;
+        c.a = self.scaled_chrome_surface_alpha(0.1);
         c
     }
 
     pub(super) fn bg_active(&self) -> Rgba {
         let mut c = self.colors.foreground;
-        c.a = 0.15;
+        c.a = self.scaled_chrome_surface_alpha(0.15);
         c
     }
 
@@ -81,7 +99,7 @@ impl SettingsWindow {
 
     pub(super) fn border_color(&self) -> Rgba {
         let mut c = self.colors.foreground;
-        c.a = 0.24;
+        c.a = self.scaled_chrome_neutral_alpha(0.24);
         c
     }
 
@@ -91,19 +109,19 @@ impl SettingsWindow {
 
     pub(super) fn accent_with_alpha(&self, alpha: f32) -> Rgba {
         let mut c = self.colors.cursor;
-        c.a = alpha;
+        c.a = self.scaled_chrome_accent_alpha(alpha);
         c
     }
 
     pub(super) fn settings_scrollbar_style(&self) -> ScrollbarPaintStyle {
         let mut track = self.colors.foreground;
-        track.a = self.adaptive_panel_alpha(SETTINGS_SCROLLBAR_TRACK_ALPHA);
+        track.a = self.scaled_chrome_neutral_alpha(SETTINGS_SCROLLBAR_TRACK_ALPHA);
 
         let mut thumb = self.colors.foreground;
-        thumb.a = self.adaptive_panel_alpha(SETTINGS_SCROLLBAR_THUMB_ALPHA);
+        thumb.a = self.scaled_chrome_neutral_alpha(SETTINGS_SCROLLBAR_THUMB_ALPHA);
 
         let mut active_thumb = self.colors.foreground;
-        active_thumb.a = self.adaptive_panel_alpha(SETTINGS_SCROLLBAR_THUMB_ACTIVE_ALPHA);
+        active_thumb.a = self.scaled_chrome_neutral_alpha(SETTINGS_SCROLLBAR_THUMB_ACTIVE_ALPHA);
 
         ScrollbarPaintStyle {
             width: SETTINGS_SCROLLBAR_WIDTH,

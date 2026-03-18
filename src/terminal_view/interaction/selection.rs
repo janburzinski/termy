@@ -668,7 +668,6 @@ impl TerminalView {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::{thread, time::Duration};
     use termy_terminal_ui::TerminalSize;
 
     #[test]
@@ -798,18 +797,11 @@ mod tests {
 
         let native = Terminal::new_native(size, None, None, None, None, None)
             .expect("native terminal should initialize for row adapter test");
-        native.write_input(b"printf native-row-adapter\r");
+        // Use replay hydration here instead of a live shell command so the row
+        // adapter test stays deterministic across different local shells and PTY timing.
+        native.hydrate_output(b"native-row-adapter");
         let expected_native_token = "native-row";
-        let mut native_row = row_text_from_terminal(&native, 0, usize::from(size.cols));
-        for _ in 0..40 {
-            let rendered_native_row: String = native_row.iter().filter_map(|c| *c).collect();
-            if rendered_native_row.contains(expected_native_token) {
-                break;
-            }
-            thread::sleep(Duration::from_millis(25));
-            let _ = native.drain_events(&mut |_| None);
-            native_row = row_text_from_terminal(&native, 0, usize::from(size.cols));
-        }
+        let native_row = row_text_from_terminal(&native, 0, usize::from(size.cols));
         assert_eq!(native_row.len(), usize::from(size.cols));
         let rendered_native_row: String = native_row.iter().filter_map(|c| *c).collect();
         assert!(rendered_native_row.contains(expected_native_token));

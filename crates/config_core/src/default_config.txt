@@ -1,6 +1,8 @@
 # Main settings
 # Current color scheme name
 theme = shell-decide
+# Increase contrast of non-terminal UI surfaces
+chrome_contrast = false
 # Enable automatic update checks and notifications
 auto_update = true
 # Enable tmux runtime integration

@@ -297,6 +297,7 @@ pub const PANE_FOCUS_EFFECT_ENUM_CHOICES: &[EnumChoice] = &[
 
 define_root_settings! {
     (Theme, "theme", [], Appearance, "THEME", "Theme", "Current color scheme name", ["color", "scheme", "appearance"], RootSettingValueKind::Special, false),
+    (ChromeContrast, "chrome_contrast", [], Appearance, "CHROME", "Increase Chrome Contrast", "Increase contrast of non-terminal UI surfaces", ["chrome", "contrast", "sidebar", "titlebar", "panel", "overlay", "tab strip"], RootSettingValueKind::Boolean, false),
     (AutoUpdate, "auto_update", [], Advanced, "UPDATES", "Auto Update", "Enable automatic update checks and notifications", ["update", "check", "upgrade", "version"], RootSettingValueKind::Boolean, false),
     (TmuxEnabled, "tmux_enabled", [], Terminal, "TMUX", "Tmux Enabled", "Enable tmux runtime integration", ["tmux", "runtime", "integration", "enabled"], RootSettingValueKind::Boolean, false),
     (TmuxPersistence, "tmux_persistence", [], Terminal, "TMUX", "Tmux Persistence", "Reuse tmux tabs and panes across app restarts", ["tmux", "session", "persistence", "restart"], RootSettingValueKind::Boolean, false),
@@ -404,6 +405,7 @@ pub fn root_setting_enum_choices(id: RootSettingId) -> Option<&'static [EnumChoi
 pub fn root_setting_default_value(config: &AppConfig, id: RootSettingId) -> Option<String> {
     match id {
         RootSettingId::Theme => Some(config.theme.clone()),
+        RootSettingId::ChromeContrast => Some(config.chrome_contrast.to_string()),
         RootSettingId::AutoUpdate => Some(config.auto_update.to_string()),
         RootSettingId::TmuxEnabled => Some(config.tmux_enabled.to_string()),
         RootSettingId::TmuxPersistence => Some(config.tmux_persistence.to_string()),
@@ -629,5 +631,14 @@ mod tests {
             RootSettingValueKind::Numeric
         );
         assert!(root_setting_enum_choices(RootSettingId::PaneFocusStrength).is_none());
+    }
+
+    #[test]
+    fn chrome_contrast_default_value_is_false() {
+        let defaults = AppConfig::default();
+        assert_eq!(
+            root_setting_default_value(&defaults, RootSettingId::ChromeContrast),
+            Some("false".to_string())
+        );
     }
 }

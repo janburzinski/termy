@@ -35,46 +35,46 @@ impl TerminalView {
         let tab_stroke_color = chrome::resolve_tab_stroke_color(
             tabbar_bg,
             colors.foreground,
-            TAB_STROKE_FOREGROUND_MIX,
+            self.chrome_contrast_profile().stroke_mix,
         );
         let mut inactive_tab_bg = colors.foreground;
-        inactive_tab_bg.a = self.scaled_chrome_alpha(0.10);
+        inactive_tab_bg.a = self.scaled_chrome_surface_alpha(0.10);
         let mut active_tab_bg = tabbar_bg;
         active_tab_bg.a = 0.0;
         let mut hovered_tab_bg = colors.foreground;
-        hovered_tab_bg.a = self.scaled_chrome_alpha(0.13);
+        hovered_tab_bg.a = self.scaled_chrome_surface_alpha(0.13);
         let mut active_tab_text = colors.foreground;
         active_tab_text.a = 0.95;
         let mut inactive_tab_text = colors.foreground;
         inactive_tab_text.a = 0.7;
         let mut close_button_bg = colors.foreground;
-        close_button_bg.a = self.scaled_chrome_alpha(0.07);
+        close_button_bg.a = self.scaled_chrome_surface_alpha(0.07);
         let mut close_button_border = colors.foreground;
-        close_button_border.a = self.scaled_chrome_alpha(0.14);
+        close_button_border.a = self.scaled_chrome_neutral_border_alpha(0.14);
         let mut close_button_hover_bg = colors.foreground;
-        close_button_hover_bg.a = self.scaled_chrome_alpha(0.16);
+        close_button_hover_bg.a = self.scaled_chrome_surface_alpha(0.16);
         let mut close_button_hover_border = colors.cursor;
-        close_button_hover_border.a = self.scaled_chrome_alpha(0.4);
+        close_button_hover_border.a = self.scaled_chrome_accent_alpha(0.4);
         let mut close_button_hover_text = colors.foreground;
         close_button_hover_text.a = 0.98;
         let now = Instant::now();
         let hint_progress = self.tab_switch_hint_progress(now);
         let mut switch_hint_bg = colors.cursor;
-        switch_hint_bg.a = self.scaled_chrome_alpha(0.18 * hint_progress);
+        switch_hint_bg.a = self.scaled_chrome_accent_alpha(0.18 * hint_progress);
         let mut switch_hint_border = colors.cursor;
-        switch_hint_border.a = self.scaled_chrome_alpha(0.52 * hint_progress);
+        switch_hint_border.a = self.scaled_chrome_accent_alpha(0.52 * hint_progress);
         let mut switch_hint_text = colors.foreground;
         switch_hint_text.a = (0.99 * hint_progress).clamp(0.0, 1.0);
         let mut tab_drop_marker_color = colors.cursor;
-        tab_drop_marker_color.a = self.scaled_chrome_alpha(0.95);
+        tab_drop_marker_color.a = self.scaled_chrome_accent_alpha(0.95);
         let mut tabbar_new_tab_bg = colors.foreground;
-        tabbar_new_tab_bg.a = self.scaled_chrome_alpha(0.11);
+        tabbar_new_tab_bg.a = self.scaled_chrome_surface_alpha(0.11);
         let mut tabbar_new_tab_hover_bg = colors.foreground;
-        tabbar_new_tab_hover_bg.a = self.scaled_chrome_alpha(0.2);
+        tabbar_new_tab_hover_bg.a = self.scaled_chrome_surface_alpha(0.2);
         let mut tabbar_new_tab_border = colors.foreground;
-        tabbar_new_tab_border.a = self.scaled_chrome_alpha(0.24);
+        tabbar_new_tab_border.a = self.scaled_chrome_neutral_border_alpha(0.24);
         let mut tabbar_new_tab_hover_border = colors.cursor;
-        tabbar_new_tab_hover_border.a = self.scaled_chrome_alpha(0.76);
+        tabbar_new_tab_hover_border.a = self.scaled_chrome_accent_alpha(0.76);
         let mut tabbar_new_tab_text = colors.foreground;
         tabbar_new_tab_text.a = 0.9;
         let mut tabbar_new_tab_hover_text = colors.cursor;

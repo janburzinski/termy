@@ -13,6 +13,11 @@ Tmux integration is an add-on. Set `tmux_enabled = true` to start in tmux mode b
 - Current color scheme name
 - Group: `THEME`
 
+`chrome_contrast`
+- Default: `false`
+- Increase contrast of non-terminal UI surfaces
+- Group: `CHROME`
+
 `font_family`
 - Default: `JetBrains Mono`
 - Font family used in terminal UI

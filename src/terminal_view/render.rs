@@ -1701,11 +1701,11 @@ impl TerminalView {
                 menu_width,
                 menu_height,
             );
-            let panel_bg = overlay_style.panel_background(0.98);
-            let panel_border = overlay_style.panel_foreground(0.22);
+            let panel_bg = overlay_style.chrome_panel_background(0.98);
+            let panel_border = overlay_style.chrome_panel_neutral(0.22);
             let text_active = overlay_style.panel_foreground(0.95);
             let text_disabled = overlay_style.panel_foreground(0.42);
-            let hover_bg = overlay_style.panel_cursor(0.22);
+            let hover_bg = overlay_style.chrome_panel_cursor(0.22);
             let buffer_position_item = |label: String| {
                 div()
                     .id("terminal-context-menu-buffer-position")
@@ -1994,9 +1994,9 @@ impl TerminalView {
                             .px(px(14.0))
                             .py(px(8.0))
                             .rounded(px(6.0))
-                            .bg(overlay_style.panel_background(0.84))
+                            .bg(overlay_style.chrome_panel_background(0.84))
                             .border_1()
-                            .border_color(overlay_style.panel_foreground(0.24))
+                            .border_color(overlay_style.chrome_panel_neutral(0.24))
                             .text_size(px(13.0))
                             .font_weight(FontWeight::MEDIUM)
                             .text_color(overlay_style.panel_foreground(0.95))
@@ -2032,9 +2032,9 @@ impl TerminalView {
                 .px(px(10.0))
                 .py(px(8.0))
                 .rounded(px(6.0))
-                .bg(overlay_style.panel_background(0.84))
+                .bg(overlay_style.chrome_panel_background(0.84))
                 .border_1()
-                .border_color(overlay_style.panel_foreground(0.24))
+                .border_color(overlay_style.chrome_panel_neutral(0.24))
                 .text_size(px(12.0))
                 .font_weight(FontWeight::MEDIUM)
                 .text_color(overlay_style.panel_foreground(0.95))

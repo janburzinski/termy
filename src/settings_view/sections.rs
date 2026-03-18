@@ -86,6 +86,7 @@ impl SettingsWindow {
         let background_blur = self.config.background_blur;
         let background_opacity_cells = self.config.background_opacity_cells;
         let theme = self.config.theme.clone();
+        let chrome_contrast = self.config.chrome_contrast;
         let font_family = self.config.font_family.clone();
         let font_size = self.config.font_size;
         let padding_x = self.config.padding_x;
@@ -106,6 +107,16 @@ impl SettingsWindow {
             cx,
         )];
         let theme_group = self.render_settings_group("THEME", theme_rows);
+
+        let chrome_rows = vec![self.render_root_bool_setting_row(
+            "chrome_contrast",
+            "chrome-contrast-toggle",
+            RootSettingId::ChromeContrast,
+            chrome_contrast,
+            "Saved",
+            cx,
+        )];
+        let chrome_group = self.render_settings_group("CHROME", chrome_rows);
 
         let window_rows = vec![
             self.render_root_bool_setting_row(
@@ -184,6 +195,7 @@ impl SettingsWindow {
                 cx,
             ))
             .child(theme_group)
+            .child(chrome_group)
             .child(window_group)
             .child(font_group)
             .child(padding_group)

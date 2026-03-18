@@ -256,6 +256,7 @@ pub struct CustomColors {
 #[derive(Debug, Clone, PartialEq)]
 pub struct AppConfig {
     pub theme: ThemeId,
+    pub chrome_contrast: bool,
     pub auto_update: bool,
     pub tmux_enabled: bool,
     pub tmux_persistence: bool,
@@ -329,6 +330,7 @@ impl Default for AppConfig {
     fn default() -> Self {
         Self {
             theme: SHELL_DECIDE_THEME_ID.to_string(),
+            chrome_contrast: false,
             auto_update: true,
             tmux_enabled: DEFAULT_TMUX_ENABLED,
             tmux_persistence: DEFAULT_TMUX_PERSISTENCE,

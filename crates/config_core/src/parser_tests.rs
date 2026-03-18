@@ -19,6 +19,7 @@ fn defaults_enable_tmux_persistence_and_raise_pane_focus_strength() {
     assert!(defaults.tmux_persistence);
     assert!(!defaults.native_tab_persistence);
     assert!(!defaults.background_opacity_cells);
+    assert!(!defaults.chrome_contrast);
     assert!((defaults.pane_focus_strength - 0.6).abs() < f32::EPSILON);
 }
 
@@ -265,6 +266,23 @@ fn enum_keys_parse_table_driven() {
         parse("working_dir_fallback = invalid\n").working_dir_fallback,
         WorkingDirFallback::Home
     );
+
+    assert!(parse("chrome_contrast = true\n").chrome_contrast);
+    assert!(parse("chrome_contrast = 1\n").chrome_contrast);
+    assert!(!parse("chrome_contrast = false\n").chrome_contrast);
+    assert!(!parse("chrome_contrast = 0\n").chrome_contrast);
+}
+
+#[test]
+fn invalid_chrome_contrast_emits_diagnostic_and_keeps_default() {
+    let report = parse_report("chrome_contrast = louder\n");
+    assert!(!report.config.chrome_contrast);
+    assert!(
+        report
+            .diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.kind == ConfigDiagnosticKind::InvalidValue)
+    );
 }
 
 fn bool_root_setting_value(config: &AppConfig, setting: RootSettingId) -> Option<bool> {
@@ -290,6 +308,7 @@ fn bool_root_setting_value(config: &AppConfig, setting: RootSettingId) -> Option
         RootSettingId::CursorBlink => Some(config.cursor_blink),
         RootSettingId::BackgroundOpacityCells => Some(config.background_opacity_cells),
         RootSettingId::BackgroundBlur => Some(config.background_blur),
+        RootSettingId::ChromeContrast => Some(config.chrome_contrast),
         RootSettingId::CopyOnSelect => Some(config.copy_on_select),
         RootSettingId::CopyOnSelectToast => Some(config.copy_on_select_toast),
         RootSettingId::CommandPaletteShowKeybinds => Some(config.command_palette_show_keybinds),
