@@ -584,7 +584,12 @@ impl SettingsWindow {
 
     fn apply_runtime_config(&mut self, config: AppConfig) -> bool {
         self.colors = TerminalColors::from_theme(&config.theme, &config.colors);
-        self.config = config;
+        self.config = AppConfig {
+            vertical_tabs_width: crate::terminal_view::TerminalView::clamp_expanded_vertical_tab_strip_width(
+                config.vertical_tabs_width,
+            ),
+            ..config
+        };
         let previous_preview = self.preview_background_opacity;
         let synced_preview = config::synced_background_opacity_preview(
             self.config.background_opacity,

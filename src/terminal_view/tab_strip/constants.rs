@@ -1,5 +1,7 @@
 pub(crate) const TABBAR_HEIGHT: f32 = 34.0;
-pub(crate) const VERTICAL_TAB_STRIP_MIN_WIDTH: f32 = 56.0;
+// Keep the expanded sidebar wide enough to preserve the titlebar branding
+// lane and top-shelf controls without collapsing into clipped chrome.
+pub(crate) const VERTICAL_TAB_STRIP_MIN_WIDTH: f32 = 160.0;
 pub(crate) const VERTICAL_TAB_STRIP_MAX_WIDTH: f32 = 480.0;
 pub(crate) const VERTICAL_TAB_STRIP_COLLAPSED_WIDTH: f32 = 56.0;
 pub(crate) const VERTICAL_TAB_STRIP_PADDING: f32 = 8.0;

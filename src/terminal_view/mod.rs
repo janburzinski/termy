@@ -2472,9 +2472,9 @@ impl TerminalView {
             tab_close_visibility: config.tab_close_visibility,
             tab_width_mode: config.tab_width_mode,
             vertical_tabs: config.vertical_tabs,
-            vertical_tabs_width: config
-                .vertical_tabs_width
-                .clamp(VERTICAL_TAB_STRIP_MIN_WIDTH, VERTICAL_TAB_STRIP_MAX_WIDTH),
+            vertical_tabs_width: Self::clamp_expanded_vertical_tab_strip_width(
+                config.vertical_tabs_width,
+            ),
             vertical_tabs_minimized: config.vertical_tabs_minimized,
             auto_hide_tabbar: config.auto_hide_tabbar,
             new_tab_animation_tab_id: None,
@@ -2724,9 +2724,8 @@ impl TerminalView {
         let tab_close_visibility_changed = self.tab_close_visibility != config.tab_close_visibility;
         let tab_width_mode_changed = self.tab_width_mode != config.tab_width_mode;
         let vertical_tabs_changed = self.vertical_tabs != config.vertical_tabs;
-        let vertical_tabs_width = config
-            .vertical_tabs_width
-            .clamp(VERTICAL_TAB_STRIP_MIN_WIDTH, VERTICAL_TAB_STRIP_MAX_WIDTH);
+        let vertical_tabs_width =
+            Self::clamp_expanded_vertical_tab_strip_width(config.vertical_tabs_width);
         let vertical_tabs_width_changed =
             (self.vertical_tabs_width - vertical_tabs_width).abs() > f32::EPSILON;
         let vertical_tabs_minimized_changed =
