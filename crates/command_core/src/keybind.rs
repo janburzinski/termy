@@ -535,6 +535,20 @@ mod tests {
     }
 
     #[test]
+    fn default_keybinds_do_not_include_toggle_tab_bar_visibility() {
+        for platform in KeybindPlatform::ALL {
+            let defaults = default_keybinds_for_platform(platform);
+            assert!(
+                !defaults
+                    .iter()
+                    .any(|binding| binding.action == CommandId::ToggleTabBarVisibility),
+                "unexpected default binding for toggle_tab_bar_visibility on {}",
+                platform.as_str()
+            );
+        }
+    }
+
+    #[test]
     fn default_keybinds_are_platform_explicit() {
         let mac = default_keybinds_for_platform(KeybindPlatform::MacOs);
         assert!(mac.iter().any(|binding| binding.trigger == "secondary-m"

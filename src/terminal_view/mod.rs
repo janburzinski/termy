@@ -1243,6 +1243,14 @@ pub(crate) fn initial_window_background_appearance(
     .appearance
 }
 
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub(crate) enum TabBarVisibility {
+    #[default]
+    FollowConfig,
+    ForceVisible,
+    ForceHidden,
+}
+
 /// The main terminal view component
 pub struct TerminalView {
     tabs: Vec<TerminalTab>,
@@ -1266,6 +1274,7 @@ pub struct TerminalView {
     vertical_tabs_width: f32,
     vertical_tabs_minimized: bool,
     auto_hide_tabbar: bool,
+    tab_bar_visibility: TabBarVisibility,
     new_tab_animation_tab_id: Option<TabId>,
     new_tab_animation_start: Option<Instant>,
     new_tab_animation_scheduled: bool,
@@ -2195,6 +2204,19 @@ impl TerminalView {
         }
     }
 
+    pub(super) fn set_tab_bar_visibility(&mut self, visibility: TabBarVisibility) -> bool {
+        if self.tab_bar_visibility == visibility {
+            return false;
+        }
+
+        self.tab_bar_visibility = visibility;
+        self.clear_pane_render_caches();
+        self.clear_terminal_scrollbar_marker_cache();
+        self.cell_size = None;
+        self.mark_tab_strip_layout_dirty();
+        true
+    }
+
     pub(super) fn mark_terminal_scrollbar_activity(&mut self, cx: &mut Context<Self>) {
         if self.terminal_scrollbar_mode() != ScrollbarVisibilityMode::OnScroll {
             return;
@@ -2524,6 +2546,7 @@ impl TerminalView {
             ),
             vertical_tabs_minimized: config.vertical_tabs_minimized,
             auto_hide_tabbar: config.auto_hide_tabbar,
+            tab_bar_visibility: TabBarVisibility::FollowConfig,
             new_tab_animation_tab_id: None,
             new_tab_animation_start: None,
             new_tab_animation_scheduled: false,

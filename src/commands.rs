@@ -946,6 +946,22 @@ define_commands!(
         ))
     ),
     (
+        ToggleTabBarVisibility,
+        TERMINAL_CONTEXT,
+        Some(palette(
+            "Toggle Tab Bar Visibility",
+            "tab bar tabs strip show hide visibility horizontal vertical",
+            CommandPaletteVisibility::Always
+        )),
+        Some(menu(
+            MenuRoot::View,
+            0,
+            "Tab Bar",
+            MenuVisibility::Always,
+            MenuActionRole::Normal
+        ))
+    ),
+    (
         ToggleVerticalTabSidebar,
         TERMINAL_CONTEXT,
         Some(palette(
@@ -1044,6 +1060,19 @@ mod tests {
             CommandAction::palette_entries()
                 .iter()
                 .any(|entry| entry.action == CommandAction::SwitchTheme)
+        );
+    }
+
+    #[test]
+    fn tab_bar_visibility_toggle_is_configurable_and_palette_visible() {
+        assert_eq!(
+            CommandAction::from_config_name("toggle_tab_bar_visibility"),
+            Some(CommandAction::ToggleTabBarVisibility)
+        );
+        assert!(
+            CommandAction::palette_entries()
+                .iter()
+                .any(|entry| entry.action == CommandAction::ToggleTabBarVisibility)
         );
     }
 
@@ -1172,6 +1201,16 @@ mod tests {
                 assert_eq!(entry.root, *root);
             }
         }
+    }
+
+    #[test]
+    fn view_menu_includes_tab_bar_toggle() {
+        let view_entries = CommandAction::menu_entries_for_root(MenuRoot::View);
+        assert!(
+            view_entries
+                .iter()
+                .any(|entry| entry.action == CommandAction::ToggleTabBarVisibility)
+        );
     }
 
     #[test]
