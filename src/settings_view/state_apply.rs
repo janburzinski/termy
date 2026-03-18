@@ -546,3 +546,38 @@ impl SettingsWindow {
         Ok(())
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::app_actions::open_settings_window;
+    use gpui::TestAppContext;
+
+    fn open_settings_window_handle(cx: &mut TestAppContext) -> gpui::WindowHandle<SettingsWindow> {
+        cx.update(|app| {
+            open_settings_window(app).expect("settings window should open");
+        });
+        cx.windows()
+            .into_iter()
+            .find_map(|handle| handle.downcast::<SettingsWindow>())
+            .expect("settings window should exist")
+    }
+
+    #[gpui::test]
+    fn vertical_tabs_width_rejects_values_below_shared_minimum(cx: &mut TestAppContext) {
+        let settings = open_settings_window_handle(cx);
+        settings
+            .update(cx, |view, _window, _cx| {
+                let result = view.apply_tabs_field(EditableField::VerticalTabsWidth, "12");
+                assert_eq!(
+                    result,
+                    Err(format!(
+                        "Vertical tabs width must be between {} and 480",
+                        crate::terminal_view::tab_strip::min_expanded_vertical_tab_strip_width()
+                            .round() as i32
+                    ))
+                );
+            })
+            .expect("settings window update should succeed");
+    }
+}

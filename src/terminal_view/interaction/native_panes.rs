@@ -13,12 +13,9 @@ impl TerminalView {
         pane_count: usize,
         min_extent: u16,
     ) -> u16 {
-        let Some(pane_count) = u16::try_from(pane_count).ok() else {
-            return 1;
-        };
-        if pane_count == 0 {
-            return 1;
-        }
+        let pane_count =
+            u16::try_from(pane_count).expect("native pane count must fit into u16");
+        assert!(pane_count > 0, "native pane count must be non-zero");
         let required = min_extent.saturating_mul(pane_count);
         if total_extent >= required {
             min_extent
@@ -57,6 +54,10 @@ impl TerminalView {
         if tab.panes.is_empty() {
             return;
         }
+        assert!(
+            tab.panes.iter().any(|pane| pane.id == tab.active_pane_id),
+            "native tab resize requires a valid active pane id"
+        );
 
         let cols = cols.max(1);
         let rows = rows.max(1);
@@ -67,7 +68,6 @@ impl TerminalView {
                 only.top = 0;
                 only.width = cols;
                 only.height = rows;
-                tab.active_pane_id = only.id.clone();
             }
             return;
         }
@@ -113,12 +113,6 @@ impl TerminalView {
             pane.width = new_right.saturating_sub(new_left).max(1);
             pane.height = new_bottom.saturating_sub(new_top).max(1);
         }
-
-        if !tab.panes.iter().any(|pane| pane.id == tab.active_pane_id)
-            && let Some(pane) = tab.panes.first()
-        {
-            tab.active_pane_id = pane.id.clone();
-        }
     }
 
     pub(in super::super) fn should_emit_tmux_resize_error_toast(&mut self, now: Instant) -> bool {
@@ -152,5 +146,59 @@ mod tests {
     fn compute_terminal_cols_preserves_edge_to_edge_ceil_behavior() {
         assert_eq!(TerminalView::compute_terminal_cols(24.1, 12.0, false), 2);
         assert_eq!(TerminalView::compute_terminal_cols(24.1, 12.0, true), 3);
+    }
+
+    fn test_terminal() -> Terminal {
+        Terminal::new_tmux(TerminalSize::default(), TerminalOptions::default())
+    }
+
+    fn test_pane(id: &str, left: u16, top: u16, width: u16, height: u16) -> TerminalPane {
+        TerminalPane {
+            id: id.to_string(),
+            left,
+            top,
+            width,
+            height,
+            degraded: false,
+            terminal: test_terminal(),
+            render_cache: RefCell::new(TerminalPaneRenderCache::default()),
+            last_alternate_screen: Cell::new(false),
+        }
+    }
+
+    #[test]
+    #[should_panic(expected = "native pane count must be non-zero")]
+    fn native_min_extent_allowed_rejects_zero_panes() {
+        let _ = TerminalView::native_min_extent_allowed(10, 0, 2);
+    }
+
+    #[test]
+    fn sync_native_tab_pane_geometry_keeps_existing_active_pane_id() {
+        let mut tab = TerminalTab {
+            id: 1,
+            window_id: "@native-1".to_string(),
+            window_index: 0,
+            panes: vec![test_pane("%native-1", 0, 0, 40, 20)],
+            active_pane_id: "%native-1".to_string(),
+            manual_title: None,
+            explicit_title: None,
+            shell_title: None,
+            current_command: None,
+            pending_command_title: None,
+            pending_command_token: 0,
+            last_prompt_cwd: None,
+            title: DEFAULT_TAB_TITLE.to_string(),
+            title_text_width: 0.0,
+            sticky_title_width: 0.0,
+            display_width: TAB_MIN_WIDTH,
+            running_process: false,
+        };
+
+        TerminalView::sync_native_tab_pane_geometry(&mut tab, 120, 42);
+
+        assert_eq!(tab.active_pane_id, "%native-1");
+        let pane = &tab.panes[0];
+        assert_eq!(pane.width, 120);
+        assert_eq!(pane.height, 42);
     }
 }

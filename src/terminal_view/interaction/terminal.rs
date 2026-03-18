@@ -117,6 +117,10 @@ impl TerminalView {
             }
             RuntimeKind::Native => {
                 for tab in &mut self.tabs {
+                    assert!(
+                        tab.panes.iter().any(|pane| pane.id == tab.active_pane_id),
+                        "native tab must own a valid active pane before resize"
+                    );
                     Self::sync_native_tab_pane_geometry(tab, cols, rows);
                 }
             }

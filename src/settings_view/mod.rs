@@ -584,12 +584,7 @@ impl SettingsWindow {
 
     fn apply_runtime_config(&mut self, config: AppConfig) -> bool {
         self.colors = TerminalColors::from_theme(&config.theme, &config.colors);
-        self.config = AppConfig {
-            vertical_tabs_width: crate::terminal_view::tab_strip::clamp_expanded_vertical_tab_strip_width(
-                config.vertical_tabs_width,
-            ),
-            ..config
-        };
+        self.config = config;
         let previous_preview = self.preview_background_opacity;
         let synced_preview = config::synced_background_opacity_preview(
             self.config.background_opacity,
@@ -1228,6 +1223,18 @@ impl Drop for SettingsWindow {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::app_actions::open_settings_window;
+    use gpui::TestAppContext;
+
+    fn open_settings_window_handle(cx: &mut TestAppContext) -> gpui::WindowHandle<SettingsWindow> {
+        cx.update(|app| {
+            open_settings_window(app).expect("settings window should open");
+        });
+        cx.windows()
+            .into_iter()
+            .find_map(|handle| handle.downcast::<SettingsWindow>())
+            .expect("settings window should exist")
+    }
 
     #[test]
     fn settings_effective_background_opacity_prefers_preview() {
@@ -1273,5 +1280,22 @@ mod tests {
                 opacity: 0.6,
             })
         );
+    }
+
+    #[gpui::test]
+    fn apply_runtime_config_preserves_out_of_range_vertical_tab_width(
+        cx: &mut TestAppContext,
+    ) {
+        let settings = open_settings_window_handle(cx);
+        settings
+            .update(cx, |view, _window, _cx| {
+                let next = AppConfig {
+                    vertical_tabs_width: 12.0,
+                    ..Default::default()
+                };
+                assert!(view.apply_runtime_config(next));
+                assert_eq!(view.config.vertical_tabs_width, 12.0);
+            })
+            .expect("settings window update should succeed");
     }
 }

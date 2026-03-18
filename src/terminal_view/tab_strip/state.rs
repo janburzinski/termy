@@ -154,10 +154,6 @@ impl TabStripTitlebarState {
         self.move_armed = false;
     }
 
-    pub(crate) fn arm(&mut self) {
-        self.move_armed = true;
-    }
-
     pub(crate) fn disarm(&mut self) {
         self.move_armed = false;
     }
@@ -452,7 +448,7 @@ mod tests {
     #[test]
     fn titlebar_state_window_move_request_disarms_after_take() {
         let mut state = TabStripTitlebarState::default();
-        state.arm();
+        assert!(state.on_mouse_down(false, 1).arm_move);
         assert!(state.take_window_move_request(true, false));
         assert!(!state.take_window_move_request(true, false));
     }

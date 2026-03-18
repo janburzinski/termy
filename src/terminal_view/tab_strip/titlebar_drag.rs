@@ -1,5 +1,5 @@
 use super::super::*;
-use super::state::{TabStripOrientation, TabStripTitlebarState};
+use super::state::TabStripOrientation;
 
 impl TerminalView {
     pub(crate) fn disarm_titlebar_window_move(&mut self) {
@@ -166,6 +166,7 @@ impl TerminalView {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::terminal_view::tab_strip::state::TabStripTitlebarState;
     use crate::terminal_view::tab_strip::layout::VerticalTabStripLayoutInput;
 
     fn vertical_layout(
@@ -183,7 +184,8 @@ mod tests {
 
     fn armed_titlebar_state() -> TabStripTitlebarState {
         let mut state = TabStripTitlebarState::default();
-        state.arm();
+        let outcome = state.on_mouse_down(false, 1);
+        assert!(outcome.arm_move);
         state
     }
 

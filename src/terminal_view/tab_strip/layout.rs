@@ -656,6 +656,21 @@ mod tests {
     }
 
     #[test]
+    fn action_rail_keeps_positive_width_in_standard_viewport() {
+        let snapshot = TerminalView::tab_strip_layout_for_viewport_width(1280.0);
+        assert!(snapshot.geometry.action_rail_width > 0.0);
+    }
+
+    #[test]
+    fn button_stays_inside_window_bounds() {
+        let snapshot = TerminalView::tab_strip_layout_for_viewport_width(1280.0);
+        let geometry = snapshot.geometry;
+        assert!(geometry.button_start_x >= geometry.action_rail_start_x);
+        assert!(geometry.button_end_x <= geometry.action_rail_end_x());
+        assert!(geometry.button_end_x <= geometry.window_width - geometry.right_inset_width);
+    }
+
+    #[test]
     fn gutter_divider_is_present_and_fixed() {
         let snapshot = TerminalView::tab_strip_layout_for_viewport_width(1280.0);
         assert_float_eq(snapshot.geometry.gutter_width, TAB_STRIP_RAIL_GUTTER_WIDTH);

@@ -95,11 +95,7 @@ impl TerminalView {
             Self::tab_strip_layout_for_viewport_with_left_inset(viewport_width, left_inset_width);
         self.set_tab_strip_layout_snapshot(layout);
 
-        let mut geometry = layout.geometry;
-        geometry.tabs_viewport_width += geometry.action_rail_width;
-        geometry.gutter_start_x += geometry.action_rail_width;
-        geometry.action_rail_start_x += geometry.action_rail_width;
-        geometry.action_rail_width = 0.0;
+        let geometry = layout.geometry;
         let tab_strip_viewport_width = geometry.tabs_viewport_width;
         let widths_changed =
             self.sync_tab_display_widths_for_viewport_if_needed(tab_strip_viewport_width);

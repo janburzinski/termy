@@ -261,6 +261,21 @@ mod tests {
     }
 
     #[test]
+    fn interactive_hit_test_excludes_right_inset_space() {
+        let geometry = TerminalView::tab_strip_geometry_for_viewport_width(1280.0);
+        let x = geometry.action_rail_end_x() + (geometry.right_inset_width * 0.5);
+        assert!(
+            !TerminalView::unified_titlebar_tab_interactive_hit_test_for_geometry(
+                x,
+                tab_hit_test_y(),
+                geometry,
+                [120.0, 120.0],
+                0.0,
+            )
+        );
+    }
+
+    #[test]
     fn interactive_hit_test_respects_half_open_region_boundaries() {
         let geometry = TerminalView::tab_strip_geometry_for_viewport_width(1280.0);
         let tabs_boundary = geometry.tabs_viewport_end_x();

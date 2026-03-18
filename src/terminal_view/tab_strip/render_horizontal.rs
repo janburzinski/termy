@@ -442,6 +442,15 @@ impl TerminalView {
             .child(
                 div()
                     .absolute()
+                    .left_0()
+                    .right_0()
+                    .top(px(state.chrome_layout.baseline_y))
+                    .h(px(TAB_STROKE_THICKNESS))
+                    .bg(palette.tab_stroke_color),
+            )
+            .child(
+                div()
+                    .absolute()
                     .left(px(tabbar_new_tab_left))
                     .top(px(tabbar_new_tab_top))
                     .child(self.render_tab_strip_control_button(
@@ -459,7 +468,6 @@ impl TerminalView {
                         cx,
                     )),
             )
-            // baseline stroke intentionally omitted (new tab button removed)
             .into_any_element()
     }
 

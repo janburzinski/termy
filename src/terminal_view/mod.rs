@@ -905,6 +905,19 @@ struct NativePaneZoomSnapshot {
     active_original_index: usize,
 }
 impl TerminalTab {
+    fn has_active_pane(&self) -> bool {
+        self.panes.iter().any(|pane| pane.id == self.active_pane_id)
+    }
+
+    fn assert_active_pane_invariant(&self) {
+        assert!(
+            self.panes.is_empty() || self.has_active_pane(),
+            "tab {} is missing active pane {}",
+            self.window_id,
+            self.active_pane_id
+        );
+    }
+
     fn active_pane_index(&self) -> Option<usize> {
         self.panes
             .iter()
