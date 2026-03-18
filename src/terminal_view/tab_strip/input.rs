@@ -207,8 +207,31 @@ impl TerminalView {
         false
     }
 
-    pub(crate) fn handle_unified_titlebar_mouse_down(
+    pub(crate) fn should_window_drag_surface_double_click(
+        interactive_hit: bool,
+        click_count: usize,
+    ) -> bool {
+        !interactive_hit && click_count == 2
+    }
+
+    fn tab_strip_interactive_hit_test(
+        &self,
+        orientation: TabStripOrientation,
+        x: f32,
+        y: f32,
+        window: &Window,
+    ) -> bool {
+        match orientation {
+            TabStripOrientation::Horizontal => {
+                self.unified_titlebar_tab_interactive_hit_test(x, y, window)
+            }
+            TabStripOrientation::Vertical => self.vertical_tab_strip_interactive_hit_test(x, y),
+        }
+    }
+
+    fn handle_window_drag_surface_mouse_down(
         &mut self,
+        orientation: TabStripOrientation,
         event: &MouseDownEvent,
         window: &mut Window,
         cx: &mut Context<Self>,
@@ -219,13 +242,13 @@ impl TerminalView {
 
         let x: f32 = event.position.x.into();
         let y: f32 = event.position.y.into();
-        let interactive_hit = self.unified_titlebar_tab_interactive_hit_test(x, y, window);
+        let interactive_hit = self.tab_strip_interactive_hit_test(orientation, x, y, window);
         let next_move_armed =
             Self::titlebar_move_armed_after_mouse_down(interactive_hit, event.click_count);
         if !next_move_armed {
             self.disarm_titlebar_window_move();
         }
-        if !interactive_hit && event.click_count == 2 {
+        if Self::should_window_drag_surface_double_click(interactive_hit, event.click_count) {
             #[cfg(target_os = "macos")]
             window.titlebar_double_click();
             #[cfg(not(target_os = "macos"))]
@@ -238,6 +261,34 @@ impl TerminalView {
             self.arm_titlebar_window_move();
             cx.stop_propagation();
         }
+    }
+
+    pub(crate) fn handle_unified_titlebar_mouse_down(
+        &mut self,
+        event: &MouseDownEvent,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.handle_window_drag_surface_mouse_down(
+            TabStripOrientation::Horizontal,
+            event,
+            window,
+            cx,
+        );
+    }
+
+    pub(crate) fn handle_vertical_tab_strip_mouse_down(
+        &mut self,
+        event: &MouseDownEvent,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.handle_window_drag_surface_mouse_down(
+            TabStripOrientation::Vertical,
+            event,
+            window,
+            cx,
+        );
     }
 
     pub(crate) fn handle_unified_titlebar_mouse_up(
@@ -280,8 +331,9 @@ impl TerminalView {
         titlebar_move_armed && dragging && !tab_drag_active
     }
 
-    pub(crate) fn handle_titlebar_tab_strip_mouse_move(
+    fn handle_window_drag_surface_mouse_move(
         &mut self,
+        orientation: TabStripOrientation,
         event: &MouseMoveEvent,
         window: &mut Window,
         cx: &mut Context<Self>,
@@ -297,17 +349,9 @@ impl TerminalView {
         }
         if event.dragging() {
             let (pointer_primary_axis, viewport_extent) =
-                self.tab_strip_drag_preview_from_window_position(
-                    TabStripOrientation::Horizontal,
-                    window,
-                    event.position,
-                );
-            if !self.update_tab_drag_preview(
-                TabStripOrientation::Horizontal,
-                pointer_primary_axis,
-                viewport_extent,
-                cx,
-            ) && changed
+                self.tab_strip_drag_preview_from_window_position(orientation, window, event.position);
+            if !self.update_tab_drag_preview(orientation, pointer_primary_axis, viewport_extent, cx)
+                && changed
             {
                 cx.notify();
             }
@@ -319,6 +363,34 @@ impl TerminalView {
         if changed {
             cx.notify();
         }
+    }
+
+    pub(crate) fn handle_titlebar_tab_strip_mouse_move(
+        &mut self,
+        event: &MouseMoveEvent,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.handle_window_drag_surface_mouse_move(
+            TabStripOrientation::Horizontal,
+            event,
+            window,
+            cx,
+        );
+    }
+
+    pub(crate) fn handle_vertical_tab_strip_mouse_move(
+        &mut self,
+        event: &MouseMoveEvent,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.handle_window_drag_surface_mouse_move(
+            TabStripOrientation::Vertical,
+            event,
+            window,
+            cx,
+        );
     }
 }
 
@@ -358,6 +430,88 @@ mod tests {
     #[test]
     fn titlebar_move_arm_state_transitions_on_mouse_up() {
         assert!(!TerminalView::titlebar_move_armed_after_mouse_up());
+    }
+
+    #[test]
+    fn window_drag_surface_double_click_requires_noninteractive_hit() {
+        assert!(TerminalView::should_window_drag_surface_double_click(false, 2));
+        assert!(!TerminalView::should_window_drag_surface_double_click(true, 2));
+        assert!(!TerminalView::should_window_drag_surface_double_click(false, 1));
+    }
+
+    #[test]
+    fn vertical_noninteractive_chrome_hit_arms_window_move() {
+        let strip_width = 220.0;
+        let compact = false;
+        let top_shelf_layout =
+            TerminalView::vertical_new_tab_shelf_layout(strip_width - TAB_STROKE_THICKNESS, compact);
+        let bottom_shelf_layout = TerminalView::vertical_bottom_shelf_layout();
+        let interactive = TerminalView::vertical_tab_strip_interactive_hit_test_for_layout(
+            24.0,
+            12.0,
+            strip_width,
+            TABBAR_HEIGHT,
+            top_shelf_layout,
+            bottom_shelf_layout,
+            180.0,
+            [TAB_ITEM_HEIGHT],
+            0.0,
+            compact,
+        );
+
+        assert!(!interactive);
+        assert!(TerminalView::titlebar_move_armed_after_mouse_down(interactive, 1));
+    }
+
+    #[test]
+    fn vertical_interactive_hit_does_not_arm_window_move() {
+        let strip_width = 220.0;
+        let compact = false;
+        let top_shelf_layout =
+            TerminalView::vertical_new_tab_shelf_layout(strip_width - TAB_STROKE_THICKNESS, compact);
+        let bottom_shelf_layout = TerminalView::vertical_bottom_shelf_layout();
+        let interactive = TerminalView::vertical_tab_strip_interactive_hit_test_for_layout(
+            24.0,
+            TABBAR_HEIGHT + top_shelf_layout.shelf_height + 12.0,
+            strip_width,
+            TABBAR_HEIGHT,
+            top_shelf_layout,
+            bottom_shelf_layout,
+            180.0,
+            [TAB_ITEM_HEIGHT],
+            0.0,
+            compact,
+        );
+
+        assert!(interactive);
+        assert!(!TerminalView::titlebar_move_armed_after_mouse_down(interactive, 1));
+    }
+
+    #[test]
+    fn vertical_noninteractive_double_click_uses_titlebar_double_click_branch() {
+        let strip_width = 220.0;
+        let compact = false;
+        let top_shelf_layout =
+            TerminalView::vertical_new_tab_shelf_layout(strip_width - TAB_STROKE_THICKNESS, compact);
+        let bottom_shelf_layout = TerminalView::vertical_bottom_shelf_layout();
+        let interactive = TerminalView::vertical_tab_strip_interactive_hit_test_for_layout(
+            24.0,
+            12.0,
+            strip_width,
+            TABBAR_HEIGHT,
+            top_shelf_layout,
+            bottom_shelf_layout,
+            180.0,
+            [TAB_ITEM_HEIGHT],
+            0.0,
+            compact,
+        );
+
+        assert!(!interactive);
+        assert!(!TerminalView::titlebar_move_armed_after_mouse_down(interactive, 2));
+        assert!(TerminalView::should_window_drag_surface_double_click(
+            interactive, 2
+        ));
     }
 
     #[test]

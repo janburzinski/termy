@@ -356,19 +356,19 @@ struct VerticalTitlebarChromeLayout {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
-struct VerticalNewTabShelfLayout {
-    shelf_height: f32,
-    button_x: f32,
-    button_y: f32,
-    button_width: f32,
-    button_height: f32,
+pub(super) struct VerticalNewTabShelfLayout {
+    pub(super) shelf_height: f32,
+    pub(super) button_x: f32,
+    pub(super) button_y: f32,
+    pub(super) button_width: f32,
+    pub(super) button_height: f32,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
-struct VerticalBottomShelfLayout {
-    shelf_height: f32,
-    button_size: f32,
-    icon_size: f32,
+pub(super) struct VerticalBottomShelfLayout {
+    pub(super) shelf_height: f32,
+    pub(super) button_size: f32,
+    pub(super) icon_size: f32,
 }
 
 struct TabItemRenderInput {
@@ -708,7 +708,7 @@ impl TerminalView {
         })
     }
 
-    fn vertical_new_tab_shelf_layout(
+    pub(super) fn vertical_new_tab_shelf_layout(
         divider_x: f32,
         compact: bool,
     ) -> VerticalNewTabShelfLayout {
@@ -742,7 +742,7 @@ impl TerminalView {
         TABBAR_NEW_TAB_BUTTON_SIZE + (VERTICAL_TAB_STRIP_PADDING * 2.0)
     }
 
-    fn vertical_bottom_shelf_layout() -> VerticalBottomShelfLayout {
+    pub(super) fn vertical_bottom_shelf_layout() -> VerticalBottomShelfLayout {
         VerticalBottomShelfLayout {
             shelf_height: Self::vertical_bottom_shelf_height(),
             button_size: VERTICAL_TITLEBAR_CONTROL_BUTTON_SIZE,
@@ -750,7 +750,9 @@ impl TerminalView {
         }
     }
 
-    fn vertical_bottom_shelf_button_origin(layout: VerticalBottomShelfLayout) -> (f32, f32) {
+    pub(super) fn vertical_bottom_shelf_button_origin(
+        layout: VerticalBottomShelfLayout,
+    ) -> (f32, f32) {
         (
             VERTICAL_TAB_STRIP_PADDING,
             ((layout.shelf_height - layout.button_size) * 0.5).max(0.0),
@@ -1213,9 +1215,6 @@ impl TerminalView {
             .relative()
             .w_full()
             .h(px(layout.shelf_height))
-            .on_mouse_move(cx.listener(|this, event: &MouseMoveEvent, window, cx| {
-                this.on_tabs_content_mouse_move(TabStripOrientation::Vertical, event, window, cx);
-            }))
             .child(
                 div()
                     .absolute()
@@ -1269,9 +1268,6 @@ impl TerminalView {
             .relative()
             .w_full()
             .h(px(layout.shelf_height))
-            .on_mouse_move(cx.listener(|this, event: &MouseMoveEvent, window, cx| {
-                this.on_tabs_content_mouse_move(TabStripOrientation::Vertical, event, window, cx);
-            }))
             .child(
                 div()
                     .absolute()
@@ -1885,10 +1881,7 @@ impl TerminalView {
             .w_full()
             .flex()
             .flex_col()
-            .gap(px(TAB_ITEM_GAP))
-            .on_mouse_move(cx.listener(|this, event: &MouseMoveEvent, window, cx| {
-                this.on_tabs_content_mouse_move(TabStripOrientation::Vertical, event, window, cx);
-            }));
+            .gap(px(TAB_ITEM_GAP));
 
         for index in 0..self.tabs.len() {
             let tab_title = self.tabs[index].title.clone();
@@ -1985,6 +1978,19 @@ impl TerminalView {
             .flex_none()
             .w(px(strip_width))
             .h_full()
+            .on_mouse_down(
+                MouseButton::Left,
+                cx.listener(Self::handle_vertical_tab_strip_mouse_down),
+            )
+            .on_mouse_up(
+                MouseButton::Left,
+                cx.listener(Self::handle_unified_titlebar_mouse_up),
+            )
+            .on_mouse_up_out(
+                MouseButton::Left,
+                cx.listener(Self::handle_unified_titlebar_mouse_up),
+            )
+            .on_mouse_move(cx.listener(Self::handle_vertical_tab_strip_mouse_move))
             .children((!compact).then(|| {
                 div()
                     .id("vertical-tabs-resize-handle")
