@@ -19,7 +19,7 @@ impl TerminalView {
 
         let x: f32 = event.position.x.into();
         let y: f32 = event.position.y.into();
-        let interactive_hit = self.tab_strip_interactive_hit_test(orientation, x, y, window);
+        let interactive_hit = self.top_chrome_interactive_hit_test(orientation, x, y, window);
         let outcome = self
             .tab_strip
             .titlebar
@@ -166,8 +166,8 @@ impl TerminalView {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::terminal_view::tab_strip::state::TabStripTitlebarState;
     use crate::terminal_view::tab_strip::layout::VerticalTabStripLayoutInput;
+    use crate::terminal_view::tab_strip::state::TabStripTitlebarState;
 
     fn vertical_layout(
         strip_width: f32,
@@ -189,6 +189,21 @@ mod tests {
         state
     }
 
+    fn hidden_titlebar_interactive_hit() -> bool {
+        let geometry = TerminalView::tab_strip_geometry_for_viewport_width(1280.0);
+        let x = geometry.row_start_x + TAB_HORIZONTAL_PADDING + 12.0;
+        let y = TOP_STRIP_CONTENT_OFFSET_Y + TABBAR_HEIGHT - 1.0;
+
+        TerminalView::unified_titlebar_top_chrome_interactive_hit_test_for_geometry(
+            x,
+            y,
+            false,
+            geometry,
+            [120.0],
+            0.0,
+        )
+    }
+
     #[test]
     fn titlebar_window_move_requires_armed_and_dragging() {
         assert!(!TabStripTitlebarState::default().should_start_window_move(true, false));
@@ -205,10 +220,7 @@ mod tests {
     fn vertical_noninteractive_chrome_hit_arms_window_move() {
         let layout = vertical_layout(220.0, false);
         let interactive = TerminalView::vertical_tab_strip_interactive_hit_test_for_layout(
-            24.0,
-            12.0,
-            &layout,
-            0.0,
+            24.0, 12.0, &layout, 0.0,
         );
         let mut state = TabStripTitlebarState::default();
 
@@ -232,13 +244,30 @@ mod tests {
     }
 
     #[test]
+    fn hidden_horizontal_titlebar_arms_window_move() {
+        let interactive = hidden_titlebar_interactive_hit();
+        let mut state = TabStripTitlebarState::default();
+
+        assert!(!interactive);
+        assert!(state.on_mouse_down(interactive, 1).arm_move);
+    }
+
+    #[test]
+    fn hidden_vertical_titlebar_double_click_uses_titlebar_double_click_branch() {
+        let interactive = hidden_titlebar_interactive_hit();
+        let mut state = TabStripTitlebarState::default();
+
+        assert!(!interactive);
+        let outcome = state.on_mouse_down(interactive, 2);
+        assert!(!outcome.arm_move);
+        assert!(outcome.trigger_window_action);
+    }
+
+    #[test]
     fn vertical_noninteractive_double_click_uses_titlebar_double_click_branch() {
         let layout = vertical_layout(220.0, false);
         let interactive = TerminalView::vertical_tab_strip_interactive_hit_test_for_layout(
-            24.0,
-            12.0,
-            &layout,
-            0.0,
+            24.0, 12.0, &layout, 0.0,
         );
         let mut state = TabStripTitlebarState::default();
 
