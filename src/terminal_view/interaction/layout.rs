@@ -16,11 +16,15 @@ impl TerminalView {
         }
 
         if self.vertical_tabs_minimized {
-            VERTICAL_TAB_STRIP_COLLAPSED_WIDTH
+            Self::collapsed_vertical_tab_strip_width()
         } else {
             self.vertical_tabs_width
                 .clamp(VERTICAL_TAB_STRIP_MIN_WIDTH, VERTICAL_TAB_STRIP_MAX_WIDTH)
         }
+    }
+
+    pub(in super::super) fn collapsed_vertical_tab_strip_width() -> f32 {
+        VERTICAL_TAB_STRIP_COLLAPSED_WIDTH.max(Self::titlebar_left_padding_for_platform())
     }
 
     fn tab_strip_sidebar_width(&self) -> f32 {
@@ -477,6 +481,14 @@ mod tests {
     #[test]
     fn window_titlebar_height_stays_when_vertical_sidebar_is_hidden() {
         assert_eq!(TerminalView::window_titlebar_height_for(true, false), TerminalView::titlebar_height());
+    }
+
+    #[test]
+    fn collapsed_vertical_sidebar_width_covers_titlebar_left_inset() {
+        assert!(
+            TerminalView::collapsed_vertical_tab_strip_width()
+                >= TerminalView::titlebar_left_padding_for_platform()
+        );
     }
 
     #[test]

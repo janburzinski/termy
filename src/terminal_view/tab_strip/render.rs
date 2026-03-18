@@ -199,8 +199,15 @@ mod tests {
         let layout = TerminalView::vertical_titlebar_sidebar_block_layout(240.0, TABBAR_HEIGHT)
             .expect("positive size should produce layout");
         assert_eq!(layout.block_width, 240.0);
-        assert_eq!(layout.right_divider.x, 239.0);
         assert_eq!(layout.bottom_seam.w, 240.0);
+        let divider = TerminalView::vertical_titlebar_right_divider_stroke(
+            layout.block_width,
+            TABBAR_HEIGHT,
+            true,
+            64.0,
+        )
+        .expect("visible sidebar should produce a titlebar divider");
+        assert_eq!(divider.x, 239.0);
     }
 
     #[test]
@@ -217,9 +224,10 @@ mod tests {
 
     #[test]
     fn vertical_titlebar_controls_fit_within_collapsed_sidebar() {
+        let collapsed_width = TerminalView::collapsed_vertical_tab_strip_width();
         let layout = TerminalView::vertical_titlebar_controls_layout(
             true,
-            VERTICAL_TAB_STRIP_COLLAPSED_WIDTH,
+            collapsed_width,
             TerminalView::titlebar_left_padding_for_platform(),
             48.0,
         )
@@ -229,7 +237,7 @@ mod tests {
             (VERTICAL_TITLEBAR_CONTROL_BUTTON_COMPACT_SIZE * 2.0)
                 + VERTICAL_TITLEBAR_CONTROL_COMPACT_GAP
         );
-        assert!(layout.left_edge(VERTICAL_TAB_STRIP_COLLAPSED_WIDTH) >= 0.0);
+        assert!(layout.left_edge(collapsed_width) >= 0.0);
         assert_eq!(layout.right_inset, VERTICAL_TAB_STRIP_PADDING + TAB_STROKE_THICKNESS);
     }
 
@@ -256,6 +264,62 @@ mod tests {
                 )
         );
     }
+
+    #[test]
+    fn vertical_titlebar_branding_width_hides_when_sidebar_is_collapsed() {
+        assert_eq!(
+            TerminalView::vertical_titlebar_branding_width(true, true, 64.0),
+            0.0
+        );
+        assert_eq!(
+            TerminalView::vertical_titlebar_branding_width(true, false, 64.0),
+            64.0
+        );
+        assert_eq!(
+            TerminalView::vertical_titlebar_branding_width(false, true, 64.0),
+            64.0
+        );
+    }
+
+    #[test]
+    fn vertical_titlebar_right_divider_uses_full_height_without_visible_branding() {
+        let divider = TerminalView::vertical_titlebar_right_divider_stroke(
+            80.0,
+            TABBAR_HEIGHT,
+            true,
+            0.0,
+        )
+        .expect("visible sidebar should always render a titlebar divider");
+        assert_eq!(divider.y, 0.0);
+        assert_eq!(divider.h, TABBAR_HEIGHT - TAB_STROKE_THICKNESS);
+    }
+
+    #[test]
+    fn vertical_titlebar_right_divider_uses_handoff_height_with_visible_branding() {
+        let divider = TerminalView::vertical_titlebar_right_divider_stroke(
+            160.0,
+            TABBAR_HEIGHT,
+            true,
+            64.0,
+        )
+        .expect("branding handoff divider should render");
+        assert_eq!(
+            divider.y,
+            (TABBAR_HEIGHT - TAB_ITEM_HEIGHT + TAB_STROKE_THICKNESS).max(0.0)
+        );
+        assert_eq!(
+            divider.h,
+            (TABBAR_HEIGHT - divider.y - TAB_STROKE_THICKNESS).max(0.0)
+        );
+    }
+
+    #[test]
+    fn vertical_titlebar_right_divider_hides_when_sidebar_is_hidden() {
+        assert_eq!(
+            TerminalView::vertical_titlebar_right_divider_stroke(160.0, TABBAR_HEIGHT, false, 64.0),
+            None
+        );
+    }
 }
 
 struct TabStripRenderState {
@@ -274,7 +338,6 @@ struct DividerCollisionState {
 #[derive(Clone, Copy, Debug, PartialEq)]
 struct VerticalTitlebarChromeLayout {
     block_width: f32,
-    right_divider: chrome::StrokeRect,
     bottom_seam: chrome::StrokeRect,
 }
 
@@ -567,16 +630,8 @@ impl TerminalView {
             return None;
         }
 
-        let divider_top = (titlebar_height - TAB_ITEM_HEIGHT + TAB_STROKE_THICKNESS).max(0.0);
-        let divider_height = (titlebar_height - divider_top - TAB_STROKE_THICKNESS).max(0.0);
         Some(VerticalTitlebarChromeLayout {
             block_width,
-            right_divider: chrome::StrokeRect {
-                x: (block_width - TAB_STROKE_THICKNESS).max(0.0),
-                y: divider_top,
-                w: TAB_STROKE_THICKNESS,
-                h: divider_height,
-            },
             bottom_seam: chrome::StrokeRect {
                 x: 0.0,
                 y: (titlebar_height - TAB_STROKE_THICKNESS).max(0.0),
@@ -599,6 +654,52 @@ impl TerminalView {
         }
 
         (branding_slot_start_x + branding_slot_width).min(block_width).max(0.0)
+    }
+
+    fn vertical_titlebar_branding_width(
+        show_sidebar_chrome: bool,
+        compact_sidebar: bool,
+        reserved_width: f32,
+    ) -> f32 {
+        if show_sidebar_chrome && compact_sidebar {
+            0.0
+        } else {
+            reserved_width.max(0.0)
+        }
+    }
+
+    fn vertical_titlebar_shows_handoff_divider(
+        show_sidebar_chrome: bool,
+        branding_width: f32,
+    ) -> bool {
+        show_sidebar_chrome && branding_width > f32::EPSILON
+    }
+
+    fn vertical_titlebar_right_divider_stroke(
+        block_width: f32,
+        titlebar_height: f32,
+        show_sidebar_chrome: bool,
+        branding_width: f32,
+    ) -> Option<chrome::StrokeRect> {
+        if !show_sidebar_chrome || block_width <= f32::EPSILON || titlebar_height <= f32::EPSILON {
+            return None;
+        }
+
+        let (y, h) = if Self::vertical_titlebar_shows_handoff_divider(show_sidebar_chrome, branding_width)
+        {
+            let divider_top = (titlebar_height - TAB_ITEM_HEIGHT + TAB_STROKE_THICKNESS).max(0.0);
+            let divider_height = (titlebar_height - divider_top - TAB_STROKE_THICKNESS).max(0.0);
+            (divider_top, divider_height)
+        } else {
+            (0.0, (titlebar_height - TAB_STROKE_THICKNESS).max(0.0))
+        };
+
+        Some(chrome::StrokeRect {
+            x: (block_width - TAB_STROKE_THICKNESS).max(0.0),
+            y,
+            w: TAB_STROKE_THICKNESS,
+            h,
+        })
     }
 
     fn vertical_titlebar_controls_layout(
@@ -800,13 +901,18 @@ impl TerminalView {
         let font_family_key = font_family.to_string();
         let reserved_width =
             self.termy_branding_reserved_width(window, font_family, font_family_key.as_str());
-        if !show_sidebar_chrome && reserved_width <= f32::EPSILON {
+        let branding_width = Self::vertical_titlebar_branding_width(
+            show_sidebar_chrome,
+            self.vertical_tabs_minimized,
+            reserved_width,
+        );
+        if !show_sidebar_chrome && branding_width <= f32::EPSILON {
             return None;
         }
 
         let gap_width = TOP_STRIP_TERMY_BRANDING_TAB_GAP;
         let leading_inset_width = Self::titlebar_left_padding_for_platform();
-        let lane_width = leading_inset_width + reserved_width + gap_width;
+        let lane_width = leading_inset_width + branding_width + gap_width;
         let palette = self.resolve_tab_strip_palette(colors, tabbar_bg);
         let mut branding_text_color = palette.inactive_tab_text;
         branding_text_color.a = branding_text_color.a.max(0.82);
@@ -816,11 +922,17 @@ impl TerminalView {
             .then(|| Self::vertical_titlebar_sidebar_block_layout(visible_block_width, TABBAR_HEIGHT))
             .flatten()
         {
+            let right_divider = Self::vertical_titlebar_right_divider_stroke(
+                layout.block_width,
+                TABBAR_HEIGHT,
+                show_sidebar_chrome,
+                branding_width,
+            );
             let controls_layout = Self::vertical_titlebar_controls_layout(
                 self.vertical_tabs_minimized,
                 layout.block_width,
                 leading_inset_width,
-                reserved_width,
+                branding_width,
             );
             let controls = controls_layout.map(|controls_layout| {
                 let ghost_hover_bg = {
@@ -894,13 +1006,13 @@ impl TerminalView {
                     .children(Self::render_termy_branding(
                         font_family,
                         leading_inset_width,
-                        reserved_width,
+                        branding_width,
                         branding_text_color,
                     ))
-                    .child(Self::render_tab_stroke(
-                        layout.right_divider,
-                        palette.tab_stroke_color,
-                    ))
+                    .children(
+                        right_divider
+                            .map(|stroke| Self::render_tab_stroke(stroke, palette.tab_stroke_color)),
+                    )
                     .child(Self::render_tab_stroke(
                         layout.bottom_seam,
                         palette.tab_stroke_color,
@@ -920,7 +1032,7 @@ impl TerminalView {
                 .children(Self::render_termy_branding(
                     font_family,
                     leading_inset_width,
-                    reserved_width,
+                    branding_width,
                     branding_text_color,
                 ))
                 .into_any_element(),
