@@ -878,20 +878,36 @@ impl SettingsWindow {
                     )
                     .into_any_element(),
             );
-        } else if self.theme_store_themes.is_empty() {
-            rows.push(
-                div()
-                    .py_4()
-                    .px_4()
-                    .bg(bg_card)
-                    .border_1()
-                    .border_color(border_color)
-                    .text_sm()
-                    .text_color(text_muted)
-                    .child("No themes available in store.")
-                    .into_any_element(),
-            );
         } else {
+            if self.theme_store_from_cache {
+                rows.push(
+                    div()
+                        .py_2()
+                        .px_4()
+                        .bg(bg_card)
+                        .border_1()
+                        .border_color(border_color)
+                        .text_sm()
+                        .text_color(text_muted)
+                        .child("Showing cached themes (API unavailable)")
+                        .into_any_element(),
+                );
+            }
+
+            if self.theme_store_themes.is_empty() {
+                rows.push(
+                    div()
+                        .py_4()
+                        .px_4()
+                        .bg(bg_card)
+                        .border_1()
+                        .border_color(border_color)
+                        .text_sm()
+                        .text_color(text_muted)
+                        .child("No themes available in store.")
+                        .into_any_element(),
+                );
+            } else {
             let filtered_themes: Vec<ThemeStoreTheme> = self
                 .theme_store_themes
                 .iter()
@@ -1088,6 +1104,7 @@ impl SettingsWindow {
                         .into_any_element(),
                 );
             }
+            } // end else (themes loaded, not error)
         }
 
         self.render_settings_group("THEME STORE", rows)
