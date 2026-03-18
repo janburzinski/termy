@@ -216,32 +216,45 @@ mod tests {
     }
 
     #[test]
-    fn vertical_control_rail_layout_fits_within_collapsed_sidebar() {
-        let layout = TerminalView::vertical_control_rail_layout(
+    fn vertical_titlebar_controls_fit_within_collapsed_sidebar() {
+        let layout = TerminalView::vertical_titlebar_controls_layout(
             true,
             VERTICAL_TAB_STRIP_COLLAPSED_WIDTH,
-            VERTICAL_TAB_STRIP_COLLAPSED_WIDTH - TAB_STROKE_THICKNESS,
-            18.0,
+            TerminalView::titlebar_left_padding_for_platform(),
+            48.0,
         )
-        .expect("collapsed sidebar should fit utility controls");
-        let controls_width = (18.0 * 2.0) + layout.gap;
-        let rail_left = VERTICAL_TAB_STRIP_COLLAPSED_WIDTH - layout.right_inset - controls_width;
-        assert!(rail_left >= 0.0);
-        assert_eq!(layout.bottom_inset, VERTICAL_TAB_STRIP_PADDING);
-        assert!(layout.clearance_height >= 18.0 + VERTICAL_TAB_STRIP_PADDING);
+        .expect("collapsed sidebar should fit titlebar controls");
+        assert_eq!(
+            layout.controls_width(),
+            (VERTICAL_TITLEBAR_CONTROL_BUTTON_COMPACT_SIZE * 2.0)
+                + VERTICAL_TITLEBAR_CONTROL_COMPACT_GAP
+        );
+        assert!(layout.left_edge(VERTICAL_TAB_STRIP_COLLAPSED_WIDTH) >= 0.0);
+        assert_eq!(layout.right_inset, VERTICAL_TAB_STRIP_PADDING + TAB_STROKE_THICKNESS);
     }
 
     #[test]
-    fn vertical_control_rail_layout_prefers_expanded_spacing_when_room_exists() {
-        let layout = TerminalView::vertical_control_rail_layout(
+    fn vertical_titlebar_controls_respect_branding_reservation() {
+        let reserved_width = 64.0;
+        let leading_inset_width = TerminalView::titlebar_left_padding_for_platform();
+        let layout = TerminalView::vertical_titlebar_controls_layout(
             false,
             220.0,
-            219.0,
-            TABBAR_NEW_TAB_BUTTON_SIZE,
+            leading_inset_width,
+            reserved_width,
         )
-        .expect("expanded sidebar should fit utility controls");
-        assert_eq!(layout.gap, 6.0);
-        assert_eq!(layout.bottom_inset, VERTICAL_TAB_STRIP_PADDING);
+        .expect("expanded sidebar should fit titlebar controls");
+        assert_eq!(layout.button_size, VERTICAL_TITLEBAR_CONTROL_BUTTON_SIZE);
+        assert_eq!(layout.icon_size, VERTICAL_TITLEBAR_CONTROL_ICON_SIZE);
+        assert_eq!(layout.gap, VERTICAL_TITLEBAR_CONTROL_GAP);
+        assert!(
+            layout.left_edge(220.0)
+                >= TerminalView::visible_branding_right_edge(
+                    220.0,
+                    leading_inset_width,
+                    reserved_width,
+                )
+        );
     }
 }
 
@@ -266,11 +279,21 @@ struct VerticalTitlebarChromeLayout {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
-struct VerticalControlRailLayout {
-    right_inset: f32,
-    bottom_inset: f32,
+struct VerticalTitlebarControlsLayout {
+    button_size: f32,
+    icon_size: f32,
     gap: f32,
-    clearance_height: f32,
+    right_inset: f32,
+}
+
+impl VerticalTitlebarControlsLayout {
+    fn controls_width(self) -> f32 {
+        (self.button_size * 2.0) + self.gap
+    }
+
+    fn left_edge(self, block_width: f32) -> f32 {
+        block_width - self.right_inset - self.controls_width()
+    }
 }
 
 struct TabItemRenderInput {
@@ -563,30 +586,60 @@ impl TerminalView {
         })
     }
 
-    fn vertical_control_rail_layout(
+    fn visible_branding_right_edge(
+        block_width: f32,
+        branding_slot_start_x: f32,
+        branding_slot_width: f32,
+    ) -> f32 {
+        if block_width <= f32::EPSILON
+            || branding_slot_width <= f32::EPSILON
+            || branding_slot_start_x >= block_width
+        {
+            return 0.0;
+        }
+
+        (branding_slot_start_x + branding_slot_width).min(block_width).max(0.0)
+    }
+
+    fn vertical_titlebar_controls_layout(
         compact: bool,
         strip_width: f32,
-        divider_x: f32,
-        button_size: f32,
-    ) -> Option<VerticalControlRailLayout> {
-        if strip_width <= f32::EPSILON || button_size <= f32::EPSILON {
+        branding_slot_start_x: f32,
+        branding_slot_width: f32,
+    ) -> Option<VerticalTitlebarControlsLayout> {
+        if strip_width <= f32::EPSILON {
             return None;
         }
 
-        let right_inset = (strip_width - divider_x).max(0.0) + VERTICAL_TAB_STRIP_PADDING;
-        let preferred_gap: f32 = if compact { 4.0 } else { 6.0 };
-        let controls_width = button_size * 2.0;
-        if strip_width < controls_width {
-            return None;
-        }
-
-        let gap = preferred_gap.min((strip_width - controls_width - right_inset).max(0.0));
-        Some(VerticalControlRailLayout {
-            right_inset,
-            bottom_inset: VERTICAL_TAB_STRIP_PADDING,
+        let button_size = if compact {
+            VERTICAL_TITLEBAR_CONTROL_BUTTON_COMPACT_SIZE
+        } else {
+            VERTICAL_TITLEBAR_CONTROL_BUTTON_SIZE
+        };
+        let icon_size = if compact {
+            VERTICAL_TITLEBAR_CONTROL_ICON_COMPACT_SIZE
+        } else {
+            VERTICAL_TITLEBAR_CONTROL_ICON_SIZE
+        };
+        let gap = if compact {
+            VERTICAL_TITLEBAR_CONTROL_COMPACT_GAP
+        } else {
+            VERTICAL_TITLEBAR_CONTROL_GAP
+        };
+        let right_inset = VERTICAL_TAB_STRIP_PADDING + TAB_STROKE_THICKNESS;
+        let layout = VerticalTitlebarControlsLayout {
+            button_size,
+            icon_size,
             gap,
-            clearance_height: button_size + (VERTICAL_TAB_STRIP_PADDING * 2.0),
-        })
+            right_inset,
+        };
+        let branding_right_edge =
+            Self::visible_branding_right_edge(strip_width, branding_slot_start_x, branding_slot_width);
+        if layout.left_edge(strip_width) < branding_right_edge {
+            return None;
+        }
+
+        Some(layout)
     }
 
     fn build_tab_strip_render_state(
@@ -742,6 +795,7 @@ impl TerminalView {
         font_family: &SharedString,
         tabbar_bg: gpui::Rgba,
         show_sidebar_chrome: bool,
+        cx: &mut Context<Self>,
     ) -> Option<AnyElement> {
         let font_family_key = font_family.to_string();
         let reserved_width =
@@ -762,6 +816,74 @@ impl TerminalView {
             .then(|| Self::vertical_titlebar_sidebar_block_layout(visible_block_width, TABBAR_HEIGHT))
             .flatten()
         {
+            let controls_layout = Self::vertical_titlebar_controls_layout(
+                self.vertical_tabs_minimized,
+                layout.block_width,
+                leading_inset_width,
+                reserved_width,
+            );
+            let controls = controls_layout.map(|controls_layout| {
+                let ghost_hover_bg = {
+                    let mut color = palette.tabbar_new_tab_hover_bg;
+                    color.a *= 0.45;
+                    color
+                };
+                let ghost_hover_border = {
+                    let mut color = palette.tabbar_new_tab_hover_border;
+                    color.a *= 0.55;
+                    color
+                };
+                let ghost_text = {
+                    let mut color = palette.inactive_tab_text;
+                    color.a = color.a.max(0.56);
+                    color
+                };
+                let ghost_hover_text = {
+                    let mut color = palette.active_tab_text;
+                    color.a = color.a.max(0.88);
+                    color
+                };
+                let collapse_icon = if self.vertical_tabs_minimized { "›" } else { "‹" };
+
+                div()
+                    .id("vertical-titlebar-controls")
+                    .absolute()
+                    .right(px(controls_layout.right_inset))
+                    .top(px(((TABBAR_HEIGHT - controls_layout.button_size) * 0.5).max(0.0)))
+                    .flex()
+                    .items_center()
+                    .gap(px(controls_layout.gap))
+                    .child(self.render_tab_strip_control_button(
+                        "vertical-titlebar-collapse",
+                        collapse_icon,
+                        TabStripControlAction::ToggleVerticalSidebar,
+                        gpui::transparent_black().into(),
+                        ghost_hover_bg,
+                        gpui::transparent_black().into(),
+                        ghost_hover_border,
+                        ghost_text,
+                        ghost_hover_text,
+                        controls_layout.button_size,
+                        controls_layout.icon_size,
+                        cx,
+                    ))
+                    .child(self.render_tab_strip_control_button(
+                        "vertical-titlebar-new-tab",
+                        "+",
+                        TabStripControlAction::NewTab,
+                        gpui::transparent_black().into(),
+                        ghost_hover_bg,
+                        gpui::transparent_black().into(),
+                        ghost_hover_border,
+                        ghost_text,
+                        ghost_hover_text,
+                        controls_layout.button_size,
+                        controls_layout.icon_size,
+                        cx,
+                    ))
+                    .into_any_element()
+            });
+
             return Some(
                 div()
                     .id("vertical-titlebar-chrome-block")
@@ -783,6 +905,7 @@ impl TerminalView {
                         layout.bottom_seam,
                         palette.tab_stroke_color,
                     ))
+                    .children(controls)
                     .into_any_element(),
             );
         }
@@ -894,13 +1017,12 @@ impl TerminalView {
     fn render_vertical_tail(
         layout: &chrome::VerticalTabChromeLayout,
         tab_stroke_color: gpui::Rgba,
-        min_height: f32,
     ) -> AnyElement {
         let mut tail = div()
             .id("vertical-tabs-lane-tail")
             .relative()
             .flex_1()
-            .min_h(px(min_height.max(0.0)));
+            .min_h(px(0.0));
 
         if layout.tail.draw_left_edge {
             tail = tail.child(
@@ -927,24 +1049,6 @@ impl TerminalView {
         }
 
         tail.into_any_element()
-    }
-
-    fn render_vertical_control_rail(
-        layout: VerticalControlRailLayout,
-        collapse_button: AnyElement,
-        new_tab_button: AnyElement,
-    ) -> AnyElement {
-        div()
-            .id("vertical-tabs-control-rail")
-            .absolute()
-            .right(px(layout.right_inset))
-            .bottom(px(layout.bottom_inset))
-            .flex()
-            .items_center()
-            .gap(px(layout.gap))
-            .child(collapse_button)
-            .child(new_tab_button)
-            .into_any_element()
     }
 
     fn render_tab_accessory(
@@ -1493,51 +1597,14 @@ impl TerminalView {
             },
         );
         debug_assert_eq!(chrome_layout.tab_strokes.len(), self.tabs.len());
-        let titlebar_block =
-            self.render_vertical_titlebar_branding(window, colors, font_family, tabbar_bg, true);
-        let control_button_size = if compact { 18.0 } else { TABBAR_NEW_TAB_BUTTON_SIZE };
-        let control_icon_size = if compact { 11.0 } else { TABBAR_NEW_TAB_ICON_SIZE };
-        let new_tab_button = self.render_tab_strip_control_button(
-            "vertical-tabs-new-tab",
-            "+",
-            TabStripControlAction::NewTab,
-            palette.tabbar_new_tab_bg,
-            palette.tabbar_new_tab_hover_bg,
-            palette.tabbar_new_tab_border,
-            palette.tabbar_new_tab_hover_border,
-            palette.tabbar_new_tab_text,
-            palette.tabbar_new_tab_hover_text,
-            control_button_size,
-            control_icon_size,
+        let titlebar_block = self.render_vertical_titlebar_branding(
+            window,
+            colors,
+            font_family,
+            tabbar_bg,
+            true,
             cx,
         );
-        let collapse_icon = if compact { "›" } else { "‹" };
-        let collapse_button = self.render_tab_strip_control_button(
-            "vertical-tabs-collapse",
-            collapse_icon,
-            TabStripControlAction::ToggleVerticalSidebar,
-            palette.tabbar_new_tab_bg,
-            palette.tabbar_new_tab_hover_bg,
-            palette.tabbar_new_tab_border,
-            palette.tabbar_new_tab_hover_border,
-            palette.tabbar_new_tab_text,
-            palette.tabbar_new_tab_hover_text,
-            control_button_size,
-            if compact { 12.0 } else { 14.0 },
-            cx,
-        );
-        let control_rail_layout = Self::vertical_control_rail_layout(
-            compact,
-            strip_width,
-            chrome_layout.divider_x,
-            control_button_size,
-        );
-        // Keep the controls fixed to the sidebar tail while reserving scrollable
-        // chrome below the last tab, so the column reads as one surface instead
-        // of splitting into a list plus a second footer bar.
-        let control_rail = control_rail_layout.map(|layout| {
-            Self::render_vertical_control_rail(layout, collapse_button, new_tab_button)
-        });
 
         let mut list = div()
             .id("vertical-tabs-list")
@@ -1689,12 +1756,9 @@ impl TerminalView {
                                     .child(Self::render_vertical_tail(
                                         &chrome_layout,
                                         palette.tab_stroke_color,
-                                        control_rail_layout
-                                            .map_or(0.0, |layout| layout.clearance_height),
                                     )),
                             ),
                     )
-                    .children(control_rail),
             )
             .into_any_element()
     }

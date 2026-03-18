@@ -2440,6 +2440,7 @@ impl Render for TerminalView {
                     &font_family,
                     tabbar_bg,
                     false,
+                    cx,
                 )
             })
             .flatten();
