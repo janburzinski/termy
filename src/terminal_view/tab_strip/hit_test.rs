@@ -1,19 +1,7 @@
 use super::super::*;
-use super::layout::TabStripGeometry;
-use super::render::{VerticalBottomShelfLayout, VerticalNewTabShelfLayout};
+use super::layout::{TabStripGeometry, VerticalTabStripLayoutSnapshot};
 
 impl TerminalView {
-    fn point_hits_rect(
-        x: f32,
-        y: f32,
-        left: f32,
-        top: f32,
-        width: f32,
-        height: f32,
-    ) -> bool {
-        x >= left && x < left + width && y >= top && y < top + height
-    }
-
     pub(crate) fn unified_titlebar_tab_shell_hit_test(
         pointer_x: f32,
         pointer_y: f32,
@@ -77,145 +65,44 @@ impl TerminalView {
         geometry.new_tab_button_contains(x, y)
     }
 
-    pub(crate) fn vertical_tab_shell_hit_test(
-        pointer_x: f32,
-        pointer_y: f32,
-        strip_width: f32,
-        tab_heights: impl IntoIterator<Item = f32>,
-        scroll_offset_y: f32,
-    ) -> bool {
-        if pointer_x < 0.0 || pointer_x >= strip_width || pointer_y < 0.0 {
-            return false;
-        }
-
-        let mut top = scroll_offset_y;
-        for height in tab_heights {
-            let bottom = top + height;
-            if pointer_y >= top && pointer_y < bottom {
-                return true;
-            }
-            top = bottom + TAB_ITEM_GAP;
-        }
-
-        false
-    }
-
-    pub(crate) fn vertical_tab_strip_interactive_hit_test(
-        &self,
-        x: f32,
-        y: f32,
-    ) -> bool {
+    pub(crate) fn vertical_tab_strip_interactive_hit_test(&self, x: f32, y: f32) -> bool {
         let local_y = y - self.chrome_height();
         if local_y < 0.0 {
             return false;
         }
 
-        let strip_width = self.effective_vertical_tab_strip_width();
-        let compact = self.vertical_tabs_minimized;
-        let top_shelf_layout =
-            Self::vertical_new_tab_shelf_layout(strip_width - TAB_STROKE_THICKNESS, compact);
-        let bottom_shelf_layout = Self::vertical_bottom_shelf_layout();
-        let list_height = self.effective_vertical_tabs_list_height();
+        let layout = self.vertical_tab_strip_layout_snapshot(Instant::now());
         let scroll_offset_y: f32 = self.tab_strip.vertical_scroll_handle.offset().y.into();
-
-        Self::vertical_tab_strip_interactive_hit_test_for_layout(
-            x,
-            local_y,
-            strip_width,
-            self.vertical_tab_strip_header_height(),
-            top_shelf_layout,
-            bottom_shelf_layout,
-            list_height,
-            std::iter::repeat_n(TAB_ITEM_HEIGHT, self.tabs.len()),
-            scroll_offset_y,
-            compact,
-        )
+        Self::vertical_tab_strip_interactive_hit_test_for_layout(x, local_y, &layout, scroll_offset_y)
     }
 
-    #[allow(clippy::too_many_arguments)]
     pub(super) fn vertical_tab_strip_interactive_hit_test_for_layout(
         x: f32,
         y: f32,
-        strip_width: f32,
-        header_height: f32,
-        top_shelf_layout: VerticalNewTabShelfLayout,
-        bottom_shelf_layout: VerticalBottomShelfLayout,
-        list_height: f32,
-        tab_heights: impl IntoIterator<Item = f32>,
+        layout: &VerticalTabStripLayoutSnapshot,
         scroll_offset_y: f32,
-        compact: bool,
     ) -> bool {
-        if x < 0.0 || x >= strip_width || y < 0.0 {
-            return false;
-        }
-
-        if !compact && x >= (strip_width - 4.0).max(0.0) {
-            return true;
-        }
-
-        let top_shelf_top = header_height;
-        if Self::point_hits_rect(
-            x,
-            y,
-            top_shelf_layout.button_x,
-            top_shelf_top + top_shelf_layout.button_y,
-            top_shelf_layout.button_width,
-            top_shelf_layout.button_height,
-        ) {
-            return true;
-        }
-
-        let list_top = top_shelf_top + top_shelf_layout.shelf_height;
-        let list_bottom = list_top + list_height;
-        if y >= list_top && y < list_bottom {
-            return Self::vertical_tab_shell_hit_test(
-                x,
-                y - list_top,
-                strip_width,
-                tab_heights,
-                scroll_offset_y,
-            );
-        }
-
-        let bottom_shelf_top = list_bottom;
-        let (button_x, button_y) = Self::vertical_bottom_shelf_button_origin(bottom_shelf_layout);
-        Self::point_hits_rect(
-            x,
-            y,
-            button_x,
-            bottom_shelf_top + button_y,
-            bottom_shelf_layout.button_size,
-            bottom_shelf_layout.button_size,
-        )
+        layout.interactive_hit(x, y, scroll_offset_y)
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::terminal_view::tab_strip::layout::VerticalTabStripLayoutInput;
 
     fn tab_hit_test_y() -> f32 {
         TOP_STRIP_CONTENT_OFFSET_Y + TABBAR_HEIGHT - 1.0
     }
 
-    fn vertical_hit_test_layout(
-        strip_width: f32,
-        compact: bool,
-    ) -> (
-        VerticalNewTabShelfLayout,
-        VerticalBottomShelfLayout,
-        f32,
-        f32,
-    ) {
-        (
-            TerminalView::vertical_new_tab_shelf_layout(
-                strip_width - TAB_STROKE_THICKNESS,
-                compact,
-            ),
-            TerminalView::vertical_bottom_shelf_layout(),
-            TABBAR_HEIGHT,
-            180.0,
-        )
+    fn vertical_hit_test_layout(strip_width: f32, compact: bool) -> VerticalTabStripLayoutSnapshot {
+        TerminalView::vertical_tab_strip_layout_for_input(VerticalTabStripLayoutInput {
+            strip_width,
+            compact,
+            header_height: TABBAR_HEIGHT,
+            list_height: 180.0,
+            tab_heights: vec![TAB_ITEM_HEIGHT, TAB_ITEM_HEIGHT],
+        })
     }
 
     #[test]
@@ -392,21 +279,13 @@ mod tests {
     fn vertical_interactive_hit_test_detects_tab_rows() {
         let strip_width = 220.0;
         let compact = false;
-        let (top_shelf_layout, bottom_shelf_layout, header_height, list_height) =
-            vertical_hit_test_layout(strip_width, compact);
-        let list_top = header_height + top_shelf_layout.shelf_height;
+        let layout = vertical_hit_test_layout(strip_width, compact);
 
         assert!(TerminalView::vertical_tab_strip_interactive_hit_test_for_layout(
             24.0,
-            list_top + 12.0,
-            strip_width,
-            header_height,
-            top_shelf_layout,
-            bottom_shelf_layout,
-            list_height,
-            [TAB_ITEM_HEIGHT, TAB_ITEM_HEIGHT],
+            layout.list_top + 12.0,
+            &layout,
             0.0,
-            compact,
         ));
     }
 
@@ -414,50 +293,34 @@ mod tests {
     fn vertical_interactive_hit_test_detects_shelf_buttons_and_resize_handle() {
         let strip_width = 220.0;
         let compact = false;
-        let (top_shelf_layout, bottom_shelf_layout, header_height, list_height) =
-            vertical_hit_test_layout(strip_width, compact);
-        let top_button_x = top_shelf_layout.button_x + (top_shelf_layout.button_width * 0.5);
-        let top_button_y =
-            header_height + top_shelf_layout.button_y + (top_shelf_layout.button_height * 0.5);
-        let bottom_shelf_top = header_height + top_shelf_layout.shelf_height + list_height;
+        let layout = vertical_hit_test_layout(strip_width, compact);
+        let top_button_x =
+            layout.top_shelf_layout.button_x + (layout.top_shelf_layout.button_width * 0.5);
+        let top_button_y = layout.header_height
+            + layout.top_shelf_layout.button_y
+            + (layout.top_shelf_layout.button_height * 0.5);
         let (bottom_button_x, bottom_button_y) =
-            TerminalView::vertical_bottom_shelf_button_origin(bottom_shelf_layout);
+            TerminalView::vertical_bottom_shelf_button_origin(layout.bottom_shelf_layout);
 
         assert!(TerminalView::vertical_tab_strip_interactive_hit_test_for_layout(
             top_button_x,
             top_button_y,
-            strip_width,
-            header_height,
-            top_shelf_layout,
-            bottom_shelf_layout,
-            list_height,
-            [TAB_ITEM_HEIGHT],
+            &layout,
             0.0,
-            compact,
         ));
         assert!(TerminalView::vertical_tab_strip_interactive_hit_test_for_layout(
-            bottom_button_x + (bottom_shelf_layout.button_size * 0.5),
-            bottom_shelf_top + bottom_button_y + (bottom_shelf_layout.button_size * 0.5),
-            strip_width,
-            header_height,
-            top_shelf_layout,
-            bottom_shelf_layout,
-            list_height,
-            [TAB_ITEM_HEIGHT],
+            bottom_button_x + (layout.bottom_shelf_layout.button_size * 0.5),
+            layout.bottom_shelf_top
+                + bottom_button_y
+                + (layout.bottom_shelf_layout.button_size * 0.5),
+            &layout,
             0.0,
-            compact,
         ));
         assert!(TerminalView::vertical_tab_strip_interactive_hit_test_for_layout(
             strip_width - 1.0,
             24.0,
-            strip_width,
-            header_height,
-            top_shelf_layout,
-            bottom_shelf_layout,
-            list_height,
-            [TAB_ITEM_HEIGHT],
+            &layout,
             0.0,
-            compact,
         ));
     }
 
@@ -465,45 +328,25 @@ mod tests {
     fn vertical_interactive_hit_test_excludes_noninteractive_chrome_backgrounds() {
         let strip_width = 220.0;
         let compact = false;
-        let (top_shelf_layout, bottom_shelf_layout, header_height, list_height) =
-            vertical_hit_test_layout(strip_width, compact);
-        let list_top = header_height + top_shelf_layout.shelf_height;
+        let layout = vertical_hit_test_layout(strip_width, compact);
 
         assert!(!TerminalView::vertical_tab_strip_interactive_hit_test_for_layout(
             24.0,
             12.0,
-            strip_width,
-            header_height,
-            top_shelf_layout,
-            bottom_shelf_layout,
-            list_height,
-            [TAB_ITEM_HEIGHT],
+            &layout,
             0.0,
-            compact,
         ));
         assert!(!TerminalView::vertical_tab_strip_interactive_hit_test_for_layout(
             12.0,
-            header_height + 8.0,
-            strip_width,
-            header_height,
-            top_shelf_layout,
-            bottom_shelf_layout,
-            list_height,
-            [TAB_ITEM_HEIGHT],
+            layout.header_height + 8.0,
+            &layout,
             0.0,
-            compact,
         ));
         assert!(!TerminalView::vertical_tab_strip_interactive_hit_test_for_layout(
             24.0,
-            list_top + TAB_ITEM_HEIGHT + 40.0,
-            strip_width,
-            header_height,
-            top_shelf_layout,
-            bottom_shelf_layout,
-            list_height,
-            [TAB_ITEM_HEIGHT],
+            layout.list_top + TAB_ITEM_HEIGHT + 40.0,
+            &layout,
             0.0,
-            compact,
         ));
     }
 }

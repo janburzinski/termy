@@ -1,7 +1,9 @@
 use super::super::*;
 use super::chrome;
 use super::hints::TabSwitchHintState;
-use super::layout::TabStripGeometry;
+use super::layout::{
+    TabStripGeometry, VerticalBottomShelfLayout, VerticalNewTabShelfLayout,
+};
 use super::state::{TabDropMarkerSide, TabStripOrientation, TabStripOverflowState};
 use gpui::{Hsla, TextRun};
 
@@ -355,22 +357,6 @@ struct VerticalTitlebarChromeLayout {
     bottom_seam: chrome::StrokeRect,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub(super) struct VerticalNewTabShelfLayout {
-    pub(super) shelf_height: f32,
-    pub(super) button_x: f32,
-    pub(super) button_y: f32,
-    pub(super) button_width: f32,
-    pub(super) button_height: f32,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub(super) struct VerticalBottomShelfLayout {
-    pub(super) shelf_height: f32,
-    pub(super) button_size: f32,
-    pub(super) icon_size: f32,
-}
-
 struct TabItemRenderInput {
     orientation: TabStripOrientation,
     index: usize,
@@ -708,55 +694,9 @@ impl TerminalView {
         })
     }
 
-    pub(super) fn vertical_new_tab_shelf_layout(
-        divider_x: f32,
-        compact: bool,
-    ) -> VerticalNewTabShelfLayout {
-        let shelf_height = VERTICAL_NEW_TAB_SHELF_HEIGHT;
-        let button_height = if compact {
-            VERTICAL_TITLEBAR_CONTROL_BUTTON_SIZE
-        } else {
-            VERTICAL_NEW_TAB_SHELF_BUTTON_HEIGHT
-        };
-        let button_width = if compact {
-            VERTICAL_TITLEBAR_CONTROL_BUTTON_SIZE
-        } else {
-            (divider_x - (VERTICAL_TAB_STRIP_PADDING * 2.0)).max(button_height)
-        };
-        let button_x = if compact {
-            ((divider_x - button_width) * 0.5).max(VERTICAL_TAB_STRIP_PADDING)
-        } else {
-            VERTICAL_TAB_STRIP_PADDING
-        };
-
-        VerticalNewTabShelfLayout {
-            shelf_height,
-            button_x,
-            button_y: ((shelf_height - button_height) * 0.5).max(0.0),
-            button_width,
-            button_height,
-        }
-    }
-
+    #[cfg(test)]
     fn vertical_bottom_shelf_height() -> f32 {
         TABBAR_NEW_TAB_BUTTON_SIZE + (VERTICAL_TAB_STRIP_PADDING * 2.0)
-    }
-
-    pub(super) fn vertical_bottom_shelf_layout() -> VerticalBottomShelfLayout {
-        VerticalBottomShelfLayout {
-            shelf_height: Self::vertical_bottom_shelf_height(),
-            button_size: VERTICAL_TITLEBAR_CONTROL_BUTTON_SIZE,
-            icon_size: VERTICAL_TITLEBAR_CONTROL_ICON_SIZE,
-        }
-    }
-
-    pub(super) fn vertical_bottom_shelf_button_origin(
-        layout: VerticalBottomShelfLayout,
-    ) -> (f32, f32) {
-        (
-            VERTICAL_TAB_STRIP_PADDING,
-            ((layout.shelf_height - layout.button_size) * 0.5).max(0.0),
-        )
     }
 
     fn build_tab_strip_render_state(
@@ -1838,29 +1778,16 @@ impl TerminalView {
 
         let palette = self.resolve_tab_strip_palette(colors, tabbar_bg);
         let now = Instant::now();
-        let new_tab_anim = self.new_tab_animation_progress(now);
-        let compact = self.vertical_tabs_minimized;
-        let strip_width = self.effective_vertical_tab_strip_width();
-        let header_height = self.vertical_tab_strip_header_height();
-        let top_shelf_layout =
-            Self::vertical_new_tab_shelf_layout(strip_width - TAB_STROKE_THICKNESS, compact);
-        let bottom_shelf_layout = Self::vertical_bottom_shelf_layout();
+        let vertical_layout = self.vertical_tab_strip_layout_snapshot(now);
+        let compact = vertical_layout.compact;
+        let strip_width = vertical_layout.strip_width;
         let active_tab_index = (self.active_tab < self.tabs.len()).then_some(self.active_tab);
-        let tab_heights: Vec<f32> = (0..self.tabs.len())
-            .map(|index| {
-                let anim_progress = new_tab_anim
-                    .filter(|(anim_index, _)| *anim_index == index)
-                    .map(|(_, progress)| progress)
-                    .unwrap_or(1.0);
-                TAB_ITEM_HEIGHT * anim_progress
-            })
-            .collect();
         let chrome_layout = chrome::compute_vertical_tab_chrome_layout(
-            tab_heights.iter().copied(),
+            vertical_layout.rows.iter().map(|row| row.height),
             chrome::VerticalTabChromeInput {
                 active_index: active_tab_index,
                 strip_width,
-                control_rail_height: header_height,
+                control_rail_height: vertical_layout.header_height,
                 tab_item_gap: TAB_ITEM_GAP,
                 external_top_seam: true,
             },
@@ -1885,10 +1812,8 @@ impl TerminalView {
 
         for index in 0..self.tabs.len() {
             let tab_title = self.tabs[index].title.clone();
-            let anim_progress = new_tab_anim
-                .filter(|(anim_index, _)| *anim_index == index)
-                .map(|(_, progress)| progress);
-            let tab_height = tab_heights[index];
+            let tab_height = vertical_layout.rows[index].height;
+            let anim_progress = (tab_height < TAB_ITEM_HEIGHT).then_some(tab_height / TAB_ITEM_HEIGHT);
             let is_active = index == self.active_tab;
             let is_hovered = self.tab_strip.hovered_tab == Some(index);
             let is_renaming = self.renaming_tab == Some(index);
@@ -2018,7 +1943,7 @@ impl TerminalView {
                     .flex_col()
                     .children(titlebar_block)
                     .child(self.render_vertical_new_tab_shelf(
-                        top_shelf_layout,
+                        vertical_layout.top_shelf_layout,
                         chrome_layout.divider_x,
                         palette.tab_stroke_color,
                         &palette,
@@ -2047,7 +1972,7 @@ impl TerminalView {
                             ),
                     )
                     .child(self.render_vertical_bottom_shelf(
-                        bottom_shelf_layout,
+                        vertical_layout.bottom_shelf_layout,
                         chrome_layout.divider_x,
                         palette.tab_stroke_color,
                         &palette,

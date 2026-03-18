@@ -45,9 +45,22 @@ impl TerminalView {
     ) {
         self.switch_tab(tab_index, cx);
         self.begin_tab_drag(tab_index, orientation);
-        if click_count == 2 {
+        if Self::should_begin_tab_rename(
+            orientation,
+            click_count,
+            self.vertical_tabs_minimized,
+        ) {
             self.begin_rename_tab(tab_index, cx);
         }
+    }
+
+    fn should_begin_tab_rename(
+        orientation: TabStripOrientation,
+        click_count: usize,
+        vertical_tabs_minimized: bool,
+    ) -> bool {
+        click_count == 2
+            && !(orientation == TabStripOrientation::Vertical && vertical_tabs_minimized)
     }
 
     pub(crate) fn tab_strip_drag_preview_from_window_position(
@@ -61,11 +74,10 @@ impl TerminalView {
                 self.tab_strip_pointer_x_from_window_x(window, position.x)
             }
             TabStripOrientation::Vertical => {
-                let pointer_y = (Into::<f32>::into(position.y)
-                    - self.chrome_height()
-                    - self.vertical_tab_strip_header_height())
-                .clamp(0.0, self.effective_vertical_tabs_list_height());
-                (pointer_y, self.effective_vertical_tabs_list_height())
+                let layout = self.vertical_tab_strip_layout_snapshot(Instant::now());
+                let pointer_y = layout
+                    .list_pointer_y_from_window_y(position.y.into(), self.chrome_height());
+                (pointer_y, layout.list_height)
             }
         }
     }
@@ -397,6 +409,17 @@ impl TerminalView {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::terminal_view::tab_strip::layout::VerticalTabStripLayoutInput;
+
+    fn vertical_layout(strip_width: f32, compact: bool) -> crate::terminal_view::tab_strip::layout::VerticalTabStripLayoutSnapshot {
+        TerminalView::vertical_tab_strip_layout_for_input(VerticalTabStripLayoutInput {
+            strip_width,
+            compact,
+            header_height: TABBAR_HEIGHT,
+            list_height: 180.0,
+            tab_heights: vec![TAB_ITEM_HEIGHT],
+        })
+    }
 
     #[test]
     fn titlebar_window_move_requires_armed_and_dragging() {
@@ -440,23 +463,34 @@ mod tests {
     }
 
     #[test]
+    fn compact_vertical_double_click_does_not_begin_rename() {
+        assert!(!TerminalView::should_begin_tab_rename(
+            TabStripOrientation::Vertical,
+            2,
+            true,
+        ));
+        assert!(TerminalView::should_begin_tab_rename(
+            TabStripOrientation::Vertical,
+            2,
+            false,
+        ));
+        assert!(TerminalView::should_begin_tab_rename(
+            TabStripOrientation::Horizontal,
+            2,
+            true,
+        ));
+    }
+
+    #[test]
     fn vertical_noninteractive_chrome_hit_arms_window_move() {
         let strip_width = 220.0;
         let compact = false;
-        let top_shelf_layout =
-            TerminalView::vertical_new_tab_shelf_layout(strip_width - TAB_STROKE_THICKNESS, compact);
-        let bottom_shelf_layout = TerminalView::vertical_bottom_shelf_layout();
+        let layout = vertical_layout(strip_width, compact);
         let interactive = TerminalView::vertical_tab_strip_interactive_hit_test_for_layout(
             24.0,
             12.0,
-            strip_width,
-            TABBAR_HEIGHT,
-            top_shelf_layout,
-            bottom_shelf_layout,
-            180.0,
-            [TAB_ITEM_HEIGHT],
+            &layout,
             0.0,
-            compact,
         );
 
         assert!(!interactive);
@@ -467,20 +501,12 @@ mod tests {
     fn vertical_interactive_hit_does_not_arm_window_move() {
         let strip_width = 220.0;
         let compact = false;
-        let top_shelf_layout =
-            TerminalView::vertical_new_tab_shelf_layout(strip_width - TAB_STROKE_THICKNESS, compact);
-        let bottom_shelf_layout = TerminalView::vertical_bottom_shelf_layout();
+        let layout = vertical_layout(strip_width, compact);
         let interactive = TerminalView::vertical_tab_strip_interactive_hit_test_for_layout(
             24.0,
-            TABBAR_HEIGHT + top_shelf_layout.shelf_height + 12.0,
-            strip_width,
-            TABBAR_HEIGHT,
-            top_shelf_layout,
-            bottom_shelf_layout,
-            180.0,
-            [TAB_ITEM_HEIGHT],
+            layout.list_top + 12.0,
+            &layout,
             0.0,
-            compact,
         );
 
         assert!(interactive);
@@ -491,20 +517,12 @@ mod tests {
     fn vertical_noninteractive_double_click_uses_titlebar_double_click_branch() {
         let strip_width = 220.0;
         let compact = false;
-        let top_shelf_layout =
-            TerminalView::vertical_new_tab_shelf_layout(strip_width - TAB_STROKE_THICKNESS, compact);
-        let bottom_shelf_layout = TerminalView::vertical_bottom_shelf_layout();
+        let layout = vertical_layout(strip_width, compact);
         let interactive = TerminalView::vertical_tab_strip_interactive_hit_test_for_layout(
             24.0,
             12.0,
-            strip_width,
-            TABBAR_HEIGHT,
-            top_shelf_layout,
-            bottom_shelf_layout,
-            180.0,
-            [TAB_ITEM_HEIGHT],
+            &layout,
             0.0,
-            compact,
         );
 
         assert!(!interactive);

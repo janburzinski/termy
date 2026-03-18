@@ -86,19 +86,15 @@ impl TerminalView {
                 }
             }
             TabStripOrientation::Vertical => {
-                let row_extent = TAB_ITEM_HEIGHT + TAB_ITEM_GAP;
-                let content_height = self.tabs.len() as f32 * row_extent;
+                let layout = self.vertical_tab_strip_layout_snapshot(Instant::now());
                 let offset = self.tab_strip.vertical_scroll_handle.offset();
-                let max_scroll = (content_height - self.effective_vertical_tabs_list_height()).max(0.0);
-                let tab_top = self.active_tab as f32 * row_extent;
-                let tab_bottom = tab_top + TAB_ITEM_HEIGHT;
+                let (_, max_scroll) = layout.scroll_bounds();
                 let current_scroll = -Into::<f32>::into(offset.y);
-                let target_scroll = Self::target_scroll_for_active_tab_bounds(
-                    current_scroll,
-                    self.effective_vertical_tabs_list_height(),
-                    tab_top,
-                    tab_bottom,
-                );
+                let Some(target_scroll) =
+                    layout.scroll_target_for_active_row(self.active_tab, current_scroll)
+                else {
+                    return;
+                };
                 let clamped_scroll = target_scroll.clamp(0.0, max_scroll);
                 let next_offset_y = -clamped_scroll;
                 let current_offset_y: f32 = offset.y.into();
@@ -392,6 +388,7 @@ impl TerminalView {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::terminal_view::tab_strip::layout::VerticalTabStripLayoutInput;
 
     fn synthetic_title_width_px(title: &str) -> f32 {
         title.chars().count() as f32 * 7.0
@@ -402,6 +399,19 @@ mod tests {
             (actual - expected).abs() < 0.0001,
             "expected {expected}, got {actual}"
         );
+    }
+
+    #[test]
+    fn vertical_scroll_target_uses_animated_row_height() {
+        let layout = TerminalView::vertical_tab_strip_layout_for_input(VerticalTabStripLayoutInput {
+            strip_width: 220.0,
+            compact: false,
+            header_height: TABBAR_HEIGHT,
+            list_height: 40.0,
+            tab_heights: vec![16.0, 48.0],
+        });
+
+        assert_eq!(layout.scroll_target_for_active_row(1, 0.0), Some(24.0));
     }
 
     #[test]

@@ -115,27 +115,6 @@ impl TerminalView {
         slot
     }
 
-    fn tab_drop_slot_from_pointer_primary_axis_for_vertical_tabs(
-        tab_count: usize,
-        pointer_primary_axis: f32,
-        scroll_offset_y: f32,
-    ) -> usize {
-        let mut top = scroll_offset_y;
-        let mut slot = 0;
-
-        for _ in 0..tab_count {
-            let midpoint_y = top + (TAB_ITEM_HEIGHT * 0.5);
-            if pointer_primary_axis < midpoint_y {
-                return slot;
-            }
-
-            top += TAB_ITEM_HEIGHT + TAB_ITEM_GAP;
-            slot += 1;
-        }
-
-        slot
-    }
-
     fn tab_drop_slot_from_pointer_primary_axis(
         &self,
         orientation: TabStripOrientation,
@@ -152,13 +131,10 @@ impl TerminalView {
                 )
             }
             TabStripOrientation::Vertical => {
+                let layout = self.vertical_tab_strip_layout_snapshot(Instant::now());
                 let scroll_offset_y: f32 =
                     self.tab_strip.vertical_scroll_handle.offset().y.into();
-                Self::tab_drop_slot_from_pointer_primary_axis_for_vertical_tabs(
-                    self.tabs.len(),
-                    pointer_primary_axis,
-                    scroll_offset_y,
-                )
+                layout.drop_slot_for_pointer(pointer_primary_axis, scroll_offset_y)
             }
         }
     }
@@ -228,13 +204,12 @@ impl TerminalView {
             return false;
         }
 
-        let viewport_height = self.effective_vertical_tabs_list_height();
-        if viewport_height <= f32::EPSILON {
+        let layout = self.vertical_tab_strip_layout_snapshot(Instant::now());
+        if layout.list_height <= f32::EPSILON {
             return false;
         }
 
-        let content_height = self.tabs.len() as f32 * (TAB_ITEM_HEIGHT + TAB_ITEM_GAP);
-        let max_scroll = (content_height - viewport_height).max(0.0);
+        let (_, max_scroll) = layout.scroll_bounds();
         if max_scroll <= TAB_STRIP_SCROLL_EPSILON {
             return false;
         }
@@ -348,9 +323,20 @@ impl TerminalView {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::terminal_view::tab_strip::layout::VerticalTabStripLayoutInput;
 
     fn synthetic_title_width_px(title: &str) -> f32 {
         title.chars().count() as f32 * 7.0
+    }
+
+    fn vertical_layout(tab_heights: Vec<f32>) -> crate::terminal_view::tab_strip::layout::VerticalTabStripLayoutSnapshot {
+        TerminalView::vertical_tab_strip_layout_for_input(VerticalTabStripLayoutInput {
+            strip_width: 220.0,
+            compact: false,
+            header_height: TABBAR_HEIGHT,
+            list_height: 180.0,
+            tab_heights,
+        })
     }
 
     #[test]
@@ -421,46 +407,35 @@ mod tests {
 
     #[test]
     fn vertical_drop_slot_respects_midpoints() {
+        let layout = vertical_layout(vec![TAB_ITEM_HEIGHT, TAB_ITEM_HEIGHT, TAB_ITEM_HEIGHT]);
         assert_eq!(
-            TerminalView::tab_drop_slot_from_pointer_primary_axis_for_vertical_tabs(3, 10.0, 0.0),
+            layout.drop_slot_for_pointer(10.0, 0.0),
             0
         );
         assert_eq!(
-            TerminalView::tab_drop_slot_from_pointer_primary_axis_for_vertical_tabs(
-                3,
-                TAB_ITEM_HEIGHT * 0.5 + 1.0,
-                0.0,
-            ),
+            layout.drop_slot_for_pointer(TAB_ITEM_HEIGHT * 0.5 + 1.0, 0.0),
             1
         );
         assert_eq!(
-            TerminalView::tab_drop_slot_from_pointer_primary_axis_for_vertical_tabs(
-                3,
-                TAB_ITEM_HEIGHT * 1.5 + 1.0,
-                0.0,
-            ),
+            layout.drop_slot_for_pointer(TAB_ITEM_HEIGHT * 1.5 + 1.0, 0.0),
             2
         );
-        assert_eq!(
-            TerminalView::tab_drop_slot_from_pointer_primary_axis_for_vertical_tabs(
-                3,
-                TAB_ITEM_HEIGHT * 3.0,
-                0.0,
-            ),
-            3
-        );
+        assert_eq!(layout.drop_slot_for_pointer(TAB_ITEM_HEIGHT * 3.0, 0.0), 3);
     }
 
     #[test]
     fn vertical_drop_slot_respects_scroll_offset() {
-        assert_eq!(
-            TerminalView::tab_drop_slot_from_pointer_primary_axis_for_vertical_tabs(2, 10.0, 0.0),
-            0
-        );
-        assert_eq!(
-            TerminalView::tab_drop_slot_from_pointer_primary_axis_for_vertical_tabs(2, 10.0, -20.0),
-            1
-        );
+        let layout = vertical_layout(vec![TAB_ITEM_HEIGHT, TAB_ITEM_HEIGHT]);
+        assert_eq!(layout.drop_slot_for_pointer(10.0, 0.0), 0);
+        assert_eq!(layout.drop_slot_for_pointer(10.0, -20.0), 1);
+    }
+
+    #[test]
+    fn vertical_drop_slot_tracks_animated_row_heights() {
+        let layout = vertical_layout(vec![16.0, 32.0, 32.0]);
+        assert_eq!(layout.drop_slot_for_pointer(7.0, 0.0), 0);
+        assert_eq!(layout.drop_slot_for_pointer(9.0, 0.0), 1);
+        assert_eq!(layout.drop_slot_for_pointer(40.0, 0.0), 2);
     }
 
     #[test]
