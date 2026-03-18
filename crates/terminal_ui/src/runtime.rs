@@ -943,7 +943,13 @@ pub fn keystroke_to_input(
 
     // Handle special keys
     let input = match key {
-        "enter" => Some(vec![b'\r']),
+        "enter" => {
+            if modifiers.shift {
+                Some(vec![b'\n'])
+            } else {
+                Some(vec![b'\r'])
+            }
+        }
         "tab" => Some(vec![b'\t']),
         "escape" => Some(vec![0x1b]),
         "backspace" => Some(vec![0x7f]),
