@@ -87,6 +87,7 @@ impl RuntimeState {
 pub(super) struct TmuxRuntime {
     pub(super) config: TmuxRuntimeConfig,
     pub(super) client: TmuxClient,
+    pub(super) preferred_cwd: Option<String>,
     pub(super) client_cols: u16,
     pub(super) client_rows: u16,
     pub(super) resize_scheduler: TmuxResizeScheduler,
@@ -96,10 +97,17 @@ pub(super) struct TmuxRuntime {
 }
 
 impl TmuxRuntime {
-    pub(super) fn new(config: TmuxRuntimeConfig, client: TmuxClient, cols: u16, rows: u16) -> Self {
+    pub(super) fn new(
+        config: TmuxRuntimeConfig,
+        client: TmuxClient,
+        preferred_cwd: Option<String>,
+        cols: u16,
+        rows: u16,
+    ) -> Self {
         Self {
             config,
             client,
+            preferred_cwd,
             client_cols: cols,
             client_rows: rows,
             resize_scheduler: TmuxResizeScheduler::default(),
@@ -138,10 +146,16 @@ impl TerminalView {
         match RuntimeKind::from_app_config(config) {
             RuntimeKind::Tmux => {
                 let tmux_runtime = Self::tmux_runtime_from_app_config(config);
+                let initial_working_dir = termy_terminal_ui::resolve_launch_working_directory(
+                    configured_working_dir,
+                    terminal_runtime.working_dir_fallback,
+                )
+                .map(|path| path.to_string_lossy().into_owned());
                 let tmux_client = match TmuxClient::new(
                     tmux_runtime.clone(),
                     initial_cols,
                     initial_rows,
+                    initial_working_dir.as_deref(),
                     Some(event_wakeup_tx.clone()),
                 ) {
                     Ok(client) => client,
@@ -175,6 +189,7 @@ impl TerminalView {
                     RuntimeState::Tmux(TmuxRuntime::new(
                         tmux_runtime,
                         tmux_client,
+                        initial_working_dir,
                         initial_cols,
                         initial_rows,
                     )),
