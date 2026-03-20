@@ -1687,7 +1687,7 @@ impl TerminalView {
         fallback: RuntimeWorkingDirFallback,
     ) -> Option<String> {
         let path = resolve_launch_working_directory(configured_working_dir, fallback)?;
-        Some(Self::display_working_directory_for_prompt(&path))
+        Some(path.to_string_lossy().into_owned())
     }
 
     fn working_dir_title_candidate(value: &str) -> Option<&str> {

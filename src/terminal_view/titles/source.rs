@@ -85,6 +85,16 @@ impl TerminalView {
         )
     }
 
+    fn display_cwd_for_tab_title(cwd: Option<&str>) -> Option<String> {
+        let cwd = cwd.map(str::trim).filter(|cwd| !cwd.is_empty())?;
+        Some(Self::display_working_directory_for_prompt(Path::new(cwd)))
+    }
+
+    fn resolve_prompt_title(template: &str, cwd: Option<&str>) -> String {
+        let cwd = Self::display_cwd_for_tab_title(cwd);
+        Self::resolve_template(template, cwd.as_deref(), None)
+    }
+
     pub(crate) fn derive_tmux_shell_title(
         tab_title: &TabTitleConfig,
         pane: &TmuxPaneState,
@@ -92,11 +102,7 @@ impl TerminalView {
         let cwd = pane.current_path.trim();
         let command = pane.current_command.trim();
         let resolved = if Self::is_shell_command(command) {
-            Self::resolve_template(
-                &tab_title.prompt_format,
-                (!cwd.is_empty()).then_some(cwd),
-                None,
-            )
+            Self::resolve_prompt_title(&tab_title.prompt_format, (!cwd.is_empty()).then_some(cwd))
         } else {
             Self::resolve_template(
                 &tab_title.command_format,
@@ -125,7 +131,7 @@ impl TerminalView {
             return None;
         }
 
-        let resolved = Self::resolve_template(&tab_title.prompt_format, cwd, None);
+        let resolved = Self::resolve_prompt_title(&tab_title.prompt_format, cwd);
         let resolved = resolved.trim();
         if resolved.is_empty() {
             return None;
@@ -180,7 +186,7 @@ impl TerminalView {
                 return None;
             }
             return Some(ExplicitTitlePayload::Prompt {
-                title: Self::resolve_template(&self.tab_title.prompt_format, Some(prompt), None),
+                title: Self::resolve_prompt_title(&self.tab_title.prompt_format, Some(prompt)),
                 cwd: prompt.to_string(),
             });
         }
@@ -342,6 +348,19 @@ mod tests {
     }
 
     #[test]
+    fn predicted_prompt_seed_title_formats_absolute_home_path_relative() {
+        let config = TabTitleConfig::default();
+        let home = TerminalView::user_home_dir().expect("home dir");
+        let cwd = home.join("projects/termy");
+        let title = TerminalView::predicted_prompt_seed_title(
+            &config,
+            Some(cwd.to_string_lossy().as_ref()),
+        );
+
+        assert_eq!(title.as_deref(), Some("~/projects/termy"));
+    }
+
+    #[test]
     fn predicted_prompt_seed_title_skips_static_only_priority() {
         let config = TabTitleConfig {
             priority: vec![TabTitleSource::Manual, TabTitleSource::Fallback],
@@ -432,6 +451,25 @@ mod tests {
     }
 
     #[test]
+    fn resolve_prompt_title_formats_absolute_home_paths_relative() {
+        let home = TerminalView::user_home_dir().expect("home dir");
+        let cwd = home.join("projects/termy");
+
+        assert_eq!(
+            TerminalView::resolve_prompt_title("{cwd}", Some(cwd.to_string_lossy().as_ref())),
+            "~/projects/termy"
+        );
+    }
+
+    #[test]
+    fn resolve_prompt_title_leaves_non_home_absolute_paths_unchanged() {
+        assert_eq!(
+            TerminalView::resolve_prompt_title("{cwd}", Some("/tmp/work")),
+            "/tmp/work"
+        );
+    }
+
+    #[test]
     fn is_shell_command_matches_fixed_shell_set_case_insensitively() {
         assert!(TerminalView::is_shell_command("zsh"));
         assert!(TerminalView::is_shell_command("PwSh"));
@@ -454,6 +492,19 @@ mod tests {
 
         let title = TerminalView::derive_tmux_shell_title(&tab_title, &pane);
         assert_eq!(title.as_deref(), Some("cwd:/tmp/work"));
+    }
+
+    #[test]
+    fn derive_tmux_shell_title_formats_home_paths_relative() {
+        let tab_title = TabTitleConfig {
+            prompt_format: "cwd:{cwd}".to_string(),
+            ..Default::default()
+        };
+        let home = TerminalView::user_home_dir().expect("home dir");
+        let pane = pane_with(home.join("work/project").to_string_lossy().as_ref(), "zsh");
+
+        let title = TerminalView::derive_tmux_shell_title(&tab_title, &pane);
+        assert_eq!(title.as_deref(), Some("cwd:~/work/project"));
     }
 
     #[test]
