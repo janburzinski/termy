@@ -814,7 +814,7 @@ impl TerminalView {
 
     fn native_split_active_pane(&mut self, axis: NativeSplitAxis, cx: &mut Context<Self>) -> bool {
         self.clear_native_zoom_snapshot_for_active_tab();
-        let Some((active_pane_id, left, top, width, height)) =
+        let Some((active_pane_id, left, top, width, height, pane_zoom_steps)) =
             self.tabs.get(self.active_tab).and_then(|tab| {
                 let index = tab.active_pane_index()?;
                 let pane = tab.panes.get(index)?;
@@ -824,6 +824,7 @@ impl TerminalView {
                     pane.top,
                     pane.width,
                     pane.height,
+                    pane.pane_zoom_steps,
                 ))
             })
         else {
@@ -900,6 +901,7 @@ impl TerminalView {
             top: split_size.1,
             width: split_size.2,
             height: split_size.3,
+            pane_zoom_steps,
             degraded: false,
             terminal,
             render_cache: RefCell::new(TerminalPaneRenderCache::default()),
@@ -1215,10 +1217,16 @@ impl TerminalView {
         if let Some(next) = tab.panes.get(next_index) {
             tab.active_pane_id = next.id.clone();
         }
+        if tab.panes.len() == 1
+            && let Some(remaining_pane) = tab.panes.first_mut()
+        {
+            remaining_pane.pane_zoom_steps = 0;
+        }
         tab.assert_active_pane_invariant();
 
         self.clear_selection();
         self.clear_hovered_link();
+        self.clear_terminal_scrollbar_marker_cache();
         self.schedule_persist_native_workspace();
         cx.notify();
         true
@@ -1337,6 +1345,7 @@ mod tests {
             top,
             width,
             height,
+            pane_zoom_steps: 0,
             degraded: false,
             terminal: test_terminal(),
             render_cache: RefCell::new(TerminalPaneRenderCache::default()),
