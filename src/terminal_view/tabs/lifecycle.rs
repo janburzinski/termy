@@ -21,6 +21,30 @@ enum NativeFocusDirection {
     Down,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum NativeCloseDirection {
+    Left,
+    Right,
+    Top,
+    Bottom,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct NativeCloseCandidate {
+    direction: NativeCloseDirection,
+    pane_indices: Vec<usize>,
+    coverage: u16,
+    required_coverage: u16,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct NativePaneRect {
+    left: u16,
+    top: u16,
+    width: u16,
+    height: u16,
+}
+
 impl TerminalView {
     pub(in super::super) fn execute_tab_command_action(
         &mut self,
@@ -420,7 +444,6 @@ impl TerminalView {
                 cx.notify();
             }
         }
-
     }
 
     pub(crate) fn commit_rename_tab(&mut self, cx: &mut Context<Self>) {
@@ -899,6 +922,144 @@ impl TerminalView {
         end.saturating_sub(start)
     }
 
+    fn native_pane_rect_from_pane(pane: &TerminalPane) -> NativePaneRect {
+        NativePaneRect {
+            left: pane.left,
+            top: pane.top,
+            width: pane.width,
+            height: pane.height,
+        }
+    }
+
+    fn native_pane_rects_overlap(a: NativePaneRect, b: NativePaneRect) -> bool {
+        let a_right = a.left.saturating_add(a.width);
+        let a_bottom = a.top.saturating_add(a.height);
+        let b_right = b.left.saturating_add(b.width);
+        let b_bottom = b.top.saturating_add(b.height);
+        a.left < b_right && b.left < a_right && a.top < b_bottom && b.top < a_bottom
+    }
+
+    fn native_close_direction_coverage(
+        mut intervals: Vec<(u16, u16)>,
+        target_start: u16,
+        target_end: u16,
+    ) -> u16 {
+        if intervals.is_empty() || target_start >= target_end {
+            return 0;
+        }
+
+        intervals.sort_unstable_by_key(|&(start, end)| (start, end));
+        let mut coverage = 0u16;
+        let mut current = intervals[0];
+
+        for interval in intervals.into_iter().skip(1) {
+            if interval.0 <= current.1 {
+                current.1 = current.1.max(interval.1);
+                continue;
+            }
+
+            coverage = coverage.saturating_add(current.1.saturating_sub(current.0));
+            current = interval;
+        }
+
+        coverage
+            .saturating_add(current.1.saturating_sub(current.0))
+            .min(target_end.saturating_sub(target_start))
+    }
+
+    fn native_close_expand_pane_rects(
+        pane_rects: &mut [NativePaneRect],
+        pane_indices: &[usize],
+        removed: &TerminalPane,
+        direction: NativeCloseDirection,
+    ) {
+        let removed_width = removed.width;
+        let removed_height = removed.height;
+
+        match direction {
+            NativeCloseDirection::Left => {
+                for &index in pane_indices {
+                    pane_rects[index].width = pane_rects[index].width.saturating_add(removed_width);
+                }
+            }
+            NativeCloseDirection::Right => {
+                for &index in pane_indices {
+                    pane_rects[index].left = pane_rects[index].left.saturating_sub(removed_width);
+                    pane_rects[index].width = pane_rects[index].width.saturating_add(removed_width);
+                }
+            }
+            NativeCloseDirection::Top => {
+                for &index in pane_indices {
+                    pane_rects[index].height =
+                        pane_rects[index].height.saturating_add(removed_height);
+                }
+            }
+            NativeCloseDirection::Bottom => {
+                for &index in pane_indices {
+                    pane_rects[index].top = pane_rects[index].top.saturating_sub(removed_height);
+                    pane_rects[index].height =
+                        pane_rects[index].height.saturating_add(removed_height);
+                }
+            }
+        }
+    }
+
+    fn native_close_direction_preserves_layout(
+        panes: &[TerminalPane],
+        removed: &TerminalPane,
+        candidate: &NativeCloseCandidate,
+    ) -> bool {
+        if candidate.pane_indices.is_empty() {
+            return false;
+        }
+
+        let mut pane_rects = panes
+            .iter()
+            .map(Self::native_pane_rect_from_pane)
+            .collect::<Vec<_>>();
+        Self::native_close_expand_pane_rects(
+            &mut pane_rects,
+            &candidate.pane_indices,
+            removed,
+            candidate.direction,
+        );
+
+        for left_index in 0..pane_rects.len() {
+            for right_index in left_index + 1..pane_rects.len() {
+                if Self::native_pane_rects_overlap(pane_rects[left_index], pane_rects[right_index])
+                {
+                    return false;
+                }
+            }
+        }
+
+        true
+    }
+
+    fn native_close_apply_candidate(
+        panes: &mut [TerminalPane],
+        removed: &TerminalPane,
+        candidate: &NativeCloseCandidate,
+    ) {
+        let mut pane_rects = panes
+            .iter()
+            .map(Self::native_pane_rect_from_pane)
+            .collect::<Vec<_>>();
+        Self::native_close_expand_pane_rects(
+            &mut pane_rects,
+            &candidate.pane_indices,
+            removed,
+            candidate.direction,
+        );
+
+        for (pane, rect) in panes.iter_mut().zip(pane_rects) {
+            pane.left = rect.left;
+            pane.top = rect.top;
+            pane.width = rect.width;
+            pane.height = rect.height;
+        }
+    }
+
     fn native_close_expand_neighbors(panes: &mut [TerminalPane], removed: &TerminalPane) {
         if panes.is_empty() {
             return;
@@ -908,13 +1069,15 @@ impl TerminalView {
         let removed_top = removed.top;
         let removed_right = removed.left.saturating_add(removed.width);
         let removed_bottom = removed.top.saturating_add(removed.height);
-        let removed_width = removed.width;
-        let removed_height = removed.height;
 
-        let mut left_candidates = Vec::<(usize, u16)>::new();
-        let mut right_candidates = Vec::<(usize, u16)>::new();
-        let mut top_candidates = Vec::<(usize, u16)>::new();
-        let mut bottom_candidates = Vec::<(usize, u16)>::new();
+        let mut left_candidates = Vec::<usize>::new();
+        let mut right_candidates = Vec::<usize>::new();
+        let mut top_candidates = Vec::<usize>::new();
+        let mut bottom_candidates = Vec::<usize>::new();
+        let mut left_intervals = Vec::<(u16, u16)>::new();
+        let mut right_intervals = Vec::<(u16, u16)>::new();
+        let mut top_intervals = Vec::<(u16, u16)>::new();
+        let mut bottom_intervals = Vec::<(u16, u16)>::new();
 
         for (index, pane) in panes.iter().enumerate() {
             let pane_left = pane.left;
@@ -926,7 +1089,9 @@ impl TerminalView {
                 let overlap =
                     Self::native_overlap_cells(pane_top, pane_bottom, removed_top, removed_bottom);
                 if overlap > 0 {
-                    left_candidates.push((index, overlap));
+                    left_candidates.push(index);
+                    left_intervals
+                        .push((pane_top.max(removed_top), pane_bottom.min(removed_bottom)));
                 }
             }
 
@@ -934,7 +1099,9 @@ impl TerminalView {
                 let overlap =
                     Self::native_overlap_cells(pane_top, pane_bottom, removed_top, removed_bottom);
                 if overlap > 0 {
-                    right_candidates.push((index, overlap));
+                    right_candidates.push(index);
+                    right_intervals
+                        .push((pane_top.max(removed_top), pane_bottom.min(removed_bottom)));
                 }
             }
 
@@ -942,7 +1109,9 @@ impl TerminalView {
                 let overlap =
                     Self::native_overlap_cells(pane_left, pane_right, removed_left, removed_right);
                 if overlap > 0 {
-                    top_candidates.push((index, overlap));
+                    top_candidates.push(index);
+                    top_intervals
+                        .push((pane_left.max(removed_left), pane_right.min(removed_right)));
                 }
             }
 
@@ -950,81 +1119,81 @@ impl TerminalView {
                 let overlap =
                     Self::native_overlap_cells(pane_left, pane_right, removed_left, removed_right);
                 if overlap > 0 {
-                    bottom_candidates.push((index, overlap));
+                    bottom_candidates.push(index);
+                    bottom_intervals
+                        .push((pane_left.max(removed_left), pane_right.min(removed_right)));
                 }
             }
         }
 
-        let sum_overlap = |candidates: &[(usize, u16)]| -> u16 {
-            candidates.iter().map(|(_, overlap)| *overlap).sum()
-        };
         let vertical_cover_target = removed_bottom.saturating_sub(removed_top);
         let horizontal_cover_target = removed_right.saturating_sub(removed_left);
 
-        let mut candidates = Vec::<(&str, u16)>::new();
-        let left_cover = sum_overlap(&left_candidates);
-        let right_cover = sum_overlap(&right_candidates);
-        let top_cover = sum_overlap(&top_candidates);
-        let bottom_cover = sum_overlap(&bottom_candidates);
+        let mut candidates = vec![
+            NativeCloseCandidate {
+                direction: NativeCloseDirection::Left,
+                pane_indices: left_candidates,
+                coverage: Self::native_close_direction_coverage(
+                    left_intervals,
+                    removed_top,
+                    removed_bottom,
+                ),
+                required_coverage: vertical_cover_target,
+            },
+            NativeCloseCandidate {
+                direction: NativeCloseDirection::Right,
+                pane_indices: right_candidates,
+                coverage: Self::native_close_direction_coverage(
+                    right_intervals,
+                    removed_top,
+                    removed_bottom,
+                ),
+                required_coverage: vertical_cover_target,
+            },
+            NativeCloseCandidate {
+                direction: NativeCloseDirection::Top,
+                pane_indices: top_candidates,
+                coverage: Self::native_close_direction_coverage(
+                    top_intervals,
+                    removed_left,
+                    removed_right,
+                ),
+                required_coverage: horizontal_cover_target,
+            },
+            NativeCloseCandidate {
+                direction: NativeCloseDirection::Bottom,
+                pane_indices: bottom_candidates,
+                coverage: Self::native_close_direction_coverage(
+                    bottom_intervals,
+                    removed_left,
+                    removed_right,
+                ),
+                required_coverage: horizontal_cover_target,
+            },
+        ];
 
-        if left_cover > 0 {
-            candidates.push(("left", left_cover));
-        }
-        if right_cover > 0 {
-            candidates.push(("right", right_cover));
-        }
-        if top_cover > 0 {
-            candidates.push(("top", top_cover));
-        }
-        if bottom_cover > 0 {
-            candidates.push(("bottom", bottom_cover));
+        candidates.sort_by_key(|candidate| Reverse(candidate.coverage));
+
+        if let Some(candidate) = candidates.iter().find(|candidate| {
+            candidate.coverage >= candidate.required_coverage
+                && Self::native_close_direction_preserves_layout(panes, removed, candidate)
+        }) {
+            Self::native_close_apply_candidate(panes, removed, candidate);
+            return;
         }
 
-        candidates.sort_by_key(|(_, coverage)| Reverse(*coverage));
-
-        let selected = candidates.into_iter().find_map(|(direction, coverage)| {
-            let target = match direction {
-                "left" | "right" => vertical_cover_target,
-                _ => horizontal_cover_target,
-            };
-            (coverage >= target).then_some(direction)
-        });
-        let selected = selected.or_else(|| {
-            ["left", "right", "top", "bottom"]
-                .into_iter()
-                .find(|direction| match *direction {
-                    "left" => !left_candidates.is_empty(),
-                    "right" => !right_candidates.is_empty(),
-                    "top" => !top_candidates.is_empty(),
-                    _ => !bottom_candidates.is_empty(),
-                })
-        });
-
-        match selected {
-            Some("left") => {
-                for (index, _) in left_candidates {
-                    panes[index].width = panes[index].width.saturating_add(removed_width);
-                }
-            }
-            Some("right") => {
-                for (index, _) in right_candidates {
-                    panes[index].left = panes[index].left.saturating_sub(removed_width);
-                    panes[index].width = panes[index].width.saturating_add(removed_width);
-                }
-            }
-            Some("top") => {
-                for (index, _) in top_candidates {
-                    panes[index].height = panes[index].height.saturating_add(removed_height);
-                }
-            }
-            Some("bottom") => {
-                for (index, _) in bottom_candidates {
-                    panes[index].top = panes[index].top.saturating_sub(removed_height);
-                    panes[index].height = panes[index].height.saturating_add(removed_height);
-                }
-            }
-            _ => {}
+        if let Some(candidate) = candidates.iter().find(|candidate| {
+            !candidate.pane_indices.is_empty()
+                && Self::native_close_direction_preserves_layout(panes, removed, candidate)
+        }) {
+            Self::native_close_apply_candidate(panes, removed, candidate);
+            return;
         }
+
+        log::warn!(
+            "native pane close could not find a non-overlapping expansion target for removed pane {}",
+            removed.id
+        );
     }
 
     fn native_close_active_pane(&mut self, cx: &mut Context<Self>) -> bool {
@@ -1157,6 +1326,24 @@ impl TerminalView {
 mod tests {
     use super::*;
 
+    fn test_terminal() -> Terminal {
+        Terminal::new_tmux(TerminalSize::default(), TerminalOptions::default())
+    }
+
+    fn test_pane(id: &str, left: u16, top: u16, width: u16, height: u16) -> TerminalPane {
+        TerminalPane {
+            id: id.to_string(),
+            left,
+            top,
+            width,
+            height,
+            degraded: false,
+            terminal: test_terminal(),
+            render_cache: RefCell::new(TerminalPaneRenderCache::default()),
+            last_alternate_screen: Cell::new(false),
+        }
+    }
+
     #[test]
     fn adjacent_tab_index_moves_middle_tab_left_and_right() {
         assert_eq!(TerminalView::adjacent_tab_index(2, 5, false), Some(1));
@@ -1240,5 +1427,29 @@ mod tests {
             TerminalView::close_pane_or_tab_target(RuntimeKind::Native, 3),
             ClosePaneOrTabTarget::ClosePane
         );
+    }
+
+    #[test]
+    fn native_close_expand_neighbors_avoids_expanding_into_overlapping_layout() {
+        let removed = test_pane("%native-1", 0, 0, 60, 20);
+        let mut panes = vec![
+            test_pane("%native-2", 60, 0, 60, 20),
+            test_pane("%native-3", 0, 20, 120, 20),
+        ];
+
+        TerminalView::native_close_expand_neighbors(&mut panes, &removed);
+
+        assert_eq!(panes[0].left, 0);
+        assert_eq!(panes[0].top, 0);
+        assert_eq!(panes[0].width, 120);
+        assert_eq!(panes[0].height, 20);
+        assert_eq!(panes[1].left, 0);
+        assert_eq!(panes[1].top, 20);
+        assert_eq!(panes[1].width, 120);
+        assert_eq!(panes[1].height, 20);
+        assert!(!TerminalView::native_pane_rects_overlap(
+            TerminalView::native_pane_rect_from_pane(&panes[0]),
+            TerminalView::native_pane_rect_from_pane(&panes[1]),
+        ));
     }
 }

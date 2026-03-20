@@ -140,7 +140,10 @@ impl TerminalView {
         let content_top_inset = self.terminal_content_top_inset();
         let backend_mode = self.runtime_kind();
         let runtime_uses_tmux = matches!(backend_mode, RuntimeKind::Tmux);
-        let active_pane_count = self.tabs.get(self.active_tab).map_or(0, |tab| tab.panes.len());
+        let active_pane_count = self
+            .tabs
+            .get(self.active_tab)
+            .map_or(0, |tab| tab.panes.len());
         let (cols, rows) = Self::terminal_grid_size_for_pane_count(
             active_pane_count,
             viewport_width,
@@ -295,7 +298,9 @@ mod tests {
             running_process: false,
         };
 
-        assert!(TerminalView::repair_native_tab_active_pane_for_resize(&mut tab));
+        assert!(TerminalView::repair_native_tab_active_pane_for_resize(
+            &mut tab
+        ));
         assert_eq!(tab.active_pane_id, "%native-1");
     }
 }

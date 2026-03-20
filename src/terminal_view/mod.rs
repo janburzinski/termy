@@ -1,5 +1,5 @@
-use crate::colors::TerminalColors;
 use crate::chrome_style::ChromeContrastProfile;
+use crate::colors::TerminalColors;
 use crate::commands::{self, CommandAction};
 use crate::config::{
     self, AppConfig, CursorStyle as AppCursorStyle, PaneFocusEffect, TabCloseVisibility,
@@ -12,8 +12,8 @@ use alacritty_terminal::term::cell::Flags;
 use flume::{Sender, bounded};
 use gpui::AppContext;
 use gpui::{
-    AnyElement, App, AsyncApp, ClipboardItem, Context, Element, Entity, ExternalPaths,
-    FocusHandle, Focusable, Font, FontWeight, InteractiveElement, IntoElement, KeyDownEvent,
+    AnyElement, App, AsyncApp, ClipboardItem, Context, Element, Entity, ExternalPaths, FocusHandle,
+    Focusable, Font, FontWeight, InteractiveElement, IntoElement, KeyDownEvent,
     ModifiersChangedEvent, MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent,
     ParentElement, Pixels, Render, ScrollWheelEvent, SharedString, Size,
     StatefulInteractiveElement, Styled, TouchPhase, WeakEntity, Window, WindowBackgroundAppearance,
@@ -38,8 +38,7 @@ use termy_terminal_ui::{
     TerminalClipboardTarget, TerminalCursorState, TerminalCursorStyle, TerminalDamageSnapshot,
     TerminalDirtySpan, TerminalEvent, TerminalGrid, TerminalGridPaintCacheHandle,
     TerminalGridPaintDamage, TerminalGridRows, TerminalMouseMode, TerminalOptions,
-    TerminalQueryColors, TerminalReplyHost, TerminalRuntimeConfig, TerminalSize,
-    TmuxLaunchTarget,
+    TerminalQueryColors, TerminalReplyHost, TerminalRuntimeConfig, TerminalSize, TmuxLaunchTarget,
     WorkingDirFallback as RuntimeWorkingDirFallback, find_link_in_line, keystroke_to_input,
 };
 #[cfg(debug_assertions)]
@@ -67,14 +66,14 @@ mod titles;
 #[cfg(target_os = "macos")]
 mod update_toasts;
 
+use self::benchmark::{BENCHMARK_SAMPLE_INTERVAL, BenchmarkConfig, BenchmarkSession};
 use command_palette::{CommandPaletteMode, CommandPaletteState, TmuxSessionIntent};
 use inline_input::{InlineInputAlignment, InlineInputState};
-use overlay_view::TerminalOverlayView;
-use runtime::{RuntimeKind, RuntimeState, TmuxRuntime};
-use self::benchmark::{BENCHMARK_SAMPLE_INTERVAL, BenchmarkConfig, BenchmarkSession};
-pub(crate) use tab_strip::constants::*;
 #[cfg(target_os = "macos")]
 pub(crate) use macos_file_drop::{NativeDropResult, install_native_file_drop};
+use overlay_view::TerminalOverlayView;
+use runtime::{RuntimeKind, RuntimeState, TmuxRuntime};
+pub(crate) use tab_strip::constants::*;
 use tab_strip::state::TabStripState;
 
 const MIN_FONT_SIZE: f32 = 8.0;
@@ -983,8 +982,7 @@ fn percentile_millis(samples_micros: &[u32], numerator: usize, denominator: usiz
     let Some(last_index) = samples_micros.len().checked_sub(1) else {
         return 0.0;
     };
-    let rank = (samples_micros.len().saturating_mul(numerator)
-        + denominator.saturating_sub(1))
+    let rank = (samples_micros.len().saturating_mul(numerator) + denominator.saturating_sub(1))
         / denominator;
     let index = rank.saturating_sub(1).min(last_index);
     samples_micros[index] as f32 / 1000.0
@@ -1955,7 +1953,8 @@ impl TerminalView {
 
     fn scaled_chrome_neutral_border_alpha(&self, base_alpha: f32) -> f32 {
         scaled_chrome_alpha_for_opacity(
-            self.chrome_contrast_profile().neutral_border_alpha(base_alpha),
+            self.chrome_contrast_profile()
+                .neutral_border_alpha(base_alpha),
             self.effective_background_opacity(),
         )
     }
@@ -2394,8 +2393,16 @@ impl TerminalView {
         let extends_right_edge = !multi_pane || pane_right == max_right;
         let extends_bottom_edge = !multi_pane || pane_bottom == max_bottom;
         let scrollbar_surface = TerminalScrollbarSurfaceGeometry::new(
-            if multi_pane { frame.origin_x } else { content_bounds.origin_x },
-            if multi_pane { frame.origin_y } else { content_bounds.origin_y },
+            if multi_pane {
+                frame.origin_x
+            } else {
+                content_bounds.origin_x
+            },
+            if multi_pane {
+                frame.origin_y
+            } else {
+                content_bounds.origin_y
+            },
             if multi_pane && !extends_right_edge {
                 frame.width
             } else if multi_pane {
@@ -2756,7 +2763,8 @@ impl TerminalView {
                 std::process::exit(1);
             }
         };
-        if benchmark_config.is_some() && RuntimeKind::from_app_config(&config) == RuntimeKind::Tmux {
+        if benchmark_config.is_some() && RuntimeKind::from_app_config(&config) == RuntimeKind::Tmux
+        {
             eprintln!("Termy startup blocked: benchmark mode requires native runtime");
             std::process::exit(1);
         }
@@ -2780,7 +2788,9 @@ impl TerminalView {
             configured_working_dir.as_deref(),
             &tab_shell_integration,
             &terminal_runtime,
-            benchmark_config.as_ref().map(|config| config.command.as_str()),
+            benchmark_config
+                .as_ref()
+                .map(|config| config.command.as_str()),
             initial_cols,
             initial_rows,
         );
@@ -3386,8 +3396,9 @@ impl TerminalView {
             for pane_index in 0..self.tabs[index].panes.len() {
                 let pane_id = self.tabs[index].panes[pane_index].id.clone();
                 let pane_is_active = pane_id == active_pane_id;
-                let events =
-                    self.tabs[index].panes[pane_index].terminal.drain_events(&mut reply_host);
+                let events = self.tabs[index].panes[pane_index]
+                    .terminal
+                    .drain_events(&mut reply_host);
 
                 for event in events {
                     match event {

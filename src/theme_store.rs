@@ -50,9 +50,7 @@ pub(crate) fn fetch_theme_store_themes_blocking(
     let base = api_base.trim_end_matches('/');
     let url = format!("{base}/themes");
 
-    let fetch_result = ureq::get(&url)
-        .set("Accept", "application/json")
-        .call();
+    let fetch_result = ureq::get(&url).set("Accept", "application/json").call();
 
     let response = match fetch_result {
         Ok(response) => response,
@@ -112,7 +110,11 @@ fn save_theme_store_cache(raw_json: &str) {
         .and_then(|v| serde_json::to_string(&v).ok())
         .unwrap_or_else(|| raw_json.to_string());
     if let Err(error) = std::fs::write(&path, minified) {
-        log::debug!("Failed to write theme store cache to {}: {}", path.display(), error);
+        log::debug!(
+            "Failed to write theme store cache to {}: {}",
+            path.display(),
+            error
+        );
     }
 }
 
@@ -121,10 +123,7 @@ fn load_theme_store_cache() -> Option<Vec<ThemeStoreTheme>> {
     let contents = std::fs::read_to_string(path).ok()?;
     let payload: serde_json::Value = serde_json::from_str(&contents).ok()?;
     let themes = payload.as_array()?;
-    let mut parsed: Vec<ThemeStoreTheme> = themes
-        .iter()
-        .filter_map(parse_theme_value)
-        .collect();
+    let mut parsed: Vec<ThemeStoreTheme> = themes.iter().filter_map(parse_theme_value).collect();
     if parsed.is_empty() {
         return None;
     }

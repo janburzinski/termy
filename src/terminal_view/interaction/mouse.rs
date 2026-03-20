@@ -191,8 +191,9 @@ impl TerminalView {
     }
 
     fn update_vertical_tab_strip_width(&mut self, requested_width: f32) -> bool {
-        let next_width =
-            crate::terminal_view::tab_strip::clamp_expanded_vertical_tab_strip_width(requested_width);
+        let next_width = crate::terminal_view::tab_strip::clamp_expanded_vertical_tab_strip_width(
+            requested_width,
+        );
         if (self.vertical_tabs_width - next_width).abs() < f32::EPSILON {
             return false;
         }

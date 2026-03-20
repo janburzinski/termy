@@ -1974,10 +1974,13 @@ impl TerminalView {
                 .child(format!("MEM: {}", memory))
                 .child(format!("Drain passes: {terminal_event_drain_passes}"))
                 .child(format!("Redraws: {terminal_redraws}"))
-                .child(format!("Alt fallback redraws: {alt_screen_fallback_redraws}"));
+                .child(format!(
+                    "Alt fallback redraws: {alt_screen_fallback_redraws}"
+                ));
             #[cfg(debug_assertions)]
-            let overlay =
-                overlay.child(format!("Wakeups runtime/view: {runtime_wakeups}/{view_wake_signals}"));
+            let overlay = overlay.child(format!(
+                "Wakeups runtime/view: {runtime_wakeups}/{view_wake_signals}"
+            ));
             overlay.into_any_element()
         });
 
@@ -2400,17 +2403,8 @@ impl Render for TerminalView {
             self.tab_bar_visibility,
             self.show_termy_in_titlebar,
         )
-            .then(|| {
-                self.render_titlebar_branding(
-                    window,
-                    &colors,
-                    &font_family,
-                    tabbar_bg,
-                    false,
-                    cx,
-                )
-            })
-            .flatten();
+        .then(|| self.render_titlebar_branding(window, &colors, &font_family, tabbar_bg, false, cx))
+        .flatten();
         let vertical_tab_strip = (self.vertical_tabs && show_tab_strip_chrome)
             .then(|| self.render_vertical_tab_strip(window, &colors, &font_family, tabbar_bg, cx));
         #[cfg(target_os = "macos")]
@@ -2726,13 +2720,16 @@ impl Render for TerminalView {
                                                 MouseButton::Right,
                                                 cx.listener(Self::handle_mouse_up),
                                             )
-                                            .when_some(
-                                                self.pane_resize_drag.as_ref(),
-                                                |s, drag| match drag.axis {
-                                                    PaneResizeAxis::Horizontal => s.cursor_col_resize(),
-                                                    PaneResizeAxis::Vertical => s.cursor_row_resize(),
-                                                },
-                                            )
+                                            .when_some(self.pane_resize_drag.as_ref(), |s, drag| {
+                                                match drag.axis {
+                                                    PaneResizeAxis::Horizontal => {
+                                                        s.cursor_col_resize()
+                                                    }
+                                                    PaneResizeAxis::Vertical => {
+                                                        s.cursor_row_resize()
+                                                    }
+                                                }
+                                            })
                                             .font_family(font_family.clone())
                                             .text_size(font_size)
                                             .child(ime_input_layer)
@@ -3034,8 +3031,8 @@ mod tests {
 
     #[test]
     fn terminal_scrollbar_overlay_frame_anchors_to_active_pane_geometry() {
-        let surface = TerminalScrollbarSurfaceGeometry::new(32.0, 48.0, 640.0, 420.0)
-            .expect("surface");
+        let surface =
+            TerminalScrollbarSurfaceGeometry::new(32.0, 48.0, 640.0, 420.0).expect("surface");
 
         let frame = terminal_scrollbar_overlay_frame(surface).expect("frame");
         assert_eq!(
@@ -3324,7 +3321,8 @@ mod tests {
     }
 
     #[test]
-    fn resolve_cell_colors_keeps_opaque_inverse_explicit_background_when_background_opacity_cells_off() {
+    fn resolve_cell_colors_keeps_opaque_inverse_explicit_background_when_background_opacity_cells_off()
+     {
         let context = test_build_context(0.2);
         let inverse_explicit_background = resolve_cell_colors(
             &test_term_cell(

@@ -560,8 +560,7 @@ mod tests {
         should_refresh_search_after_tmux_pane_focus,
     };
     use crate::terminal_view::{
-        Terminal, TerminalOptions, TerminalPane, TerminalPaneRenderCache, TerminalSize,
-        TerminalTab,
+        Terminal, TerminalOptions, TerminalPane, TerminalPaneRenderCache, TerminalSize, TerminalTab,
     };
     use std::cell::{Cell, RefCell};
 
