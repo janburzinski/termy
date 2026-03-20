@@ -1170,7 +1170,7 @@ impl TerminalView {
                 div()
                     .px(px(9.0))
                     .py(px(3.0))
-                    .rounded_md()
+                    .rounded(px(TERMINAL_OVERLAY_GEOMETRY.control_radius))
                     .bg(button_bg)
                     .border_1()
                     .border_color(button_border)
