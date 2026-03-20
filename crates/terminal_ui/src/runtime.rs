@@ -275,10 +275,16 @@ fn resolve_shell_path(configured_shell: Option<&str>) -> String {
 }
 
 fn startup_shell(runtime_config: &TerminalRuntimeConfig, startup_command: Option<&str>) -> Shell {
-    if let Some(command) = startup_command.map(str::trim).filter(|command| !command.is_empty()) {
+    if let Some(command) = startup_command
+        .map(str::trim)
+        .filter(|command| !command.is_empty())
+    {
         #[cfg(unix)]
         {
-            return Shell::new("/bin/sh".to_string(), vec!["-c".to_string(), command.to_string()]);
+            return Shell::new(
+                "/bin/sh".to_string(),
+                vec!["-c".to_string(), command.to_string()],
+            );
         }
 
         #[cfg(target_os = "windows")]
@@ -404,7 +410,7 @@ fn apply_utf8_locale_overrides(env_overrides: &mut HashMap<String, String>) {
     }
 }
 
-fn resolve_working_directory(configured: Option<&str>) -> Option<std::path::PathBuf> {
+pub fn resolve_working_directory_path(configured: Option<&str>) -> Option<std::path::PathBuf> {
     let configured = configured?.trim();
     if configured.is_empty() {
         return None;
@@ -422,6 +428,26 @@ fn resolve_working_directory(configured: Option<&str>) -> Option<std::path::Path
     };
 
     if path.is_dir() { Some(path) } else { None }
+}
+
+pub fn resolve_launch_working_directory(
+    configured: Option<&str>,
+    fallback: WorkingDirFallback,
+) -> Option<PathBuf> {
+    resolve_working_directory_path(configured).or_else(|| default_working_directory_with_fallback(fallback))
+}
+
+pub fn normalize_working_directory_candidate(candidate: Option<&str>) -> Option<String> {
+    let candidate = candidate?.trim();
+    if candidate.is_empty() {
+        return None;
+    }
+
+    Some(
+        resolve_working_directory_path(Some(candidate))
+            .map(|path| path.to_string_lossy().into_owned())
+            .unwrap_or_else(|| candidate.to_string()),
+    )
 }
 
 fn default_working_directory_with_fallback(fallback: WorkingDirFallback) -> Option<PathBuf> {
@@ -676,9 +702,8 @@ impl Terminal {
         let shell = startup_shell(&runtime_config, startup_command);
 
         // Get working directory
-        let working_directory = resolve_working_directory(configured_working_dir).or_else(|| {
-            default_working_directory_with_fallback(runtime_config.working_dir_fallback)
-        });
+        let working_directory =
+            resolve_launch_working_directory(configured_working_dir, runtime_config.working_dir_fallback);
 
         // Configure PTY
         let pty_options = PtyOptions {
@@ -937,13 +962,15 @@ mod tests {
     use super::quote_shell_program_if_needed;
     use super::{
         DEFAULT_TERM, TerminalCursorState, TerminalDamageSnapshot, TerminalEvent,
-        TerminalRuntimeConfig, TerminalSize, cursor_position_from_term, cursor_state_from_term,
-        drain_runtime_events, pty_env_overrides, resolve_shell_path, take_term_damage_snapshot,
-        termmode_to_terminal_mouse_mode,
+        TerminalRuntimeConfig, TerminalSize, WorkingDirFallback, cursor_position_from_term,
+        cursor_state_from_term, drain_runtime_events, normalize_working_directory_candidate,
+        pty_env_overrides,
+        resolve_launch_working_directory, resolve_shell_path, take_term_damage_snapshot,
+        termmode_to_terminal_mouse_mode, user_home_dir,
     };
-    use crate::protocol::{TerminalClipboardTarget, TerminalQueryColors, TerminalReplyHost};
     use crate::grid::TerminalCursorStyle;
     use crate::keyboard::{TerminalKeyEventKind, TerminalKeyboardMode, keystroke_to_input};
+    use crate::protocol::{TerminalClipboardTarget, TerminalQueryColors, TerminalReplyHost};
     use alacritty_terminal::{
         event::VoidListener,
         grid::{Dimensions, Scroll},
@@ -1055,15 +1082,50 @@ mod tests {
     }
 
     #[test]
+    fn normalize_working_directory_candidate_preserves_relative_paths() {
+        assert_eq!(
+            normalize_working_directory_candidate(Some(" crates/cli ")).as_deref(),
+            Some("crates/cli")
+        );
+    }
+
+    #[test]
+    fn resolve_launch_working_directory_falls_back_when_configured_path_is_invalid() {
+        let fallback = std::env::current_dir().expect("current dir");
+        let resolved = resolve_launch_working_directory(
+            Some("/definitely/not/a/real/termy/path"),
+            WorkingDirFallback::Process,
+        )
+        .expect("fallback path");
+        assert_eq!(resolved, fallback);
+    }
+
+    #[test]
+    fn normalize_working_directory_candidate_expands_home_directory() {
+        let expected = user_home_dir()
+            .expect("home dir")
+            .to_string_lossy()
+            .into_owned();
+        assert_eq!(
+            normalize_working_directory_candidate(Some("~")).as_deref(),
+            Some(expected.as_str())
+        );
+    }
+
+    #[test]
     fn drain_runtime_events_replays_replies_and_collects_runtime_events() {
         let (events_tx, events_rx) = unbounded();
         events_tx
-            .send(alacritty_terminal::event::Event::PtyWrite("\x1b[?6c".to_string()))
+            .send(alacritty_terminal::event::Event::PtyWrite(
+                "\x1b[?6c".to_string(),
+            ))
             .unwrap();
         events_tx
-            .send(alacritty_terminal::event::Event::TextAreaSizeRequest(Arc::new(
-                |window_size| format!("size:{}x{}", window_size.num_cols, window_size.num_lines),
-            )))
+            .send(alacritty_terminal::event::Event::TextAreaSizeRequest(
+                Arc::new(|window_size| {
+                    format!("size:{}x{}", window_size.num_cols, window_size.num_lines)
+                }),
+            ))
             .unwrap();
         events_tx
             .send(alacritty_terminal::event::Event::ClipboardLoad(
@@ -1081,7 +1143,9 @@ mod tests {
             .send(alacritty_terminal::event::Event::Wakeup)
             .unwrap();
         events_tx
-            .send(alacritty_terminal::event::Event::Title("shell title".to_string()))
+            .send(alacritty_terminal::event::Event::Title(
+                "shell title".to_string(),
+            ))
             .unwrap();
         events_tx
             .send(alacritty_terminal::event::Event::ClipboardStore(
@@ -1089,7 +1153,9 @@ mod tests {
                 "stored text".to_string(),
             ))
             .unwrap();
-        events_tx.send(alacritty_terminal::event::Event::Exit).unwrap();
+        events_tx
+            .send(alacritty_terminal::event::Event::Exit)
+            .unwrap();
         drop(events_tx);
 
         let term = FairMutex::new(term_after_bytes(b"\x1b]10;#123456\x07"));
@@ -1121,17 +1187,15 @@ mod tests {
             reply_host.requested_targets,
             vec![TerminalClipboardTarget::Selection]
         );
-        assert!(
-            matches!(
-                events.as_slice(),
-                [
-                    TerminalEvent::Wakeup,
-                    TerminalEvent::Title(title),
-                    TerminalEvent::ClipboardStore(text),
-                    TerminalEvent::Exit,
-                ] if title == "shell title" && text == "stored text"
-            )
-        );
+        assert!(matches!(
+            events.as_slice(),
+            [
+                TerminalEvent::Wakeup,
+                TerminalEvent::Title(title),
+                TerminalEvent::ClipboardStore(text),
+                TerminalEvent::Exit,
+            ] if title == "shell title" && text == "stored text"
+        ));
     }
 
     #[test]

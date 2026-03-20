@@ -256,9 +256,10 @@ impl TerminalView {
             termy_toast::error("Failed to create tab: active tmux window is unavailable");
             return;
         };
+        let working_dir = self.preferred_working_dir_for_new_session(working_dir, cx);
 
         if !self.run_tmux_action("Failed to create tab", |tmux_client| {
-            tmux_client.new_window_after(active_window_id.as_str(), working_dir)
+            tmux_client.new_window_after(active_window_id.as_str(), working_dir.as_deref())
         }) {
             return;
         }
@@ -399,12 +400,13 @@ impl TerminalView {
         &mut self,
         cx: &mut Context<Self>,
     ) -> bool {
+        let working_dir = self.preferred_working_dir_for_new_session(None, cx);
         self.with_active_pane_action(
             "Failed to split pane",
             TmuxPostActionRefresh::ImmediateSnapshot,
             true,
             cx,
-            |tmux_client, pane_id| tmux_client.split_vertical(pane_id),
+            move |tmux_client, pane_id| tmux_client.split_vertical(pane_id, working_dir.as_deref()),
         )
     }
 
@@ -412,12 +414,15 @@ impl TerminalView {
         &mut self,
         cx: &mut Context<Self>,
     ) -> bool {
+        let working_dir = self.preferred_working_dir_for_new_session(None, cx);
         self.with_active_pane_action(
             "Failed to split pane",
             TmuxPostActionRefresh::ImmediateSnapshot,
             true,
             cx,
-            |tmux_client, pane_id| tmux_client.split_horizontal(pane_id),
+            move |tmux_client, pane_id| {
+                tmux_client.split_horizontal(pane_id, working_dir.as_deref())
+            },
         )
     }
 
@@ -553,8 +558,7 @@ mod tests {
         should_refresh_search_after_tmux_pane_focus,
     };
     use crate::terminal_view::{
-        Terminal, TerminalOptions, TerminalPane, TerminalPaneRenderCache, TerminalSize,
-        TerminalTab,
+        Terminal, TerminalOptions, TerminalPane, TerminalPaneRenderCache, TerminalSize, TerminalTab,
     };
     use std::cell::{Cell, RefCell};
 
@@ -572,6 +576,7 @@ mod tests {
             top: 0,
             width: 10,
             height: 10,
+            pane_zoom_steps: 0,
             degraded: false,
             terminal: Terminal::new_tmux(TerminalSize::default(), TerminalOptions::default()),
             render_cache: RefCell::new(TerminalPaneRenderCache::default()),
@@ -583,6 +588,7 @@ mod tests {
             top: 0,
             width: 10,
             height: 10,
+            pane_zoom_steps: 0,
             degraded: false,
             terminal: Terminal::new_tmux(TerminalSize::default(), TerminalOptions::default()),
             render_cache: RefCell::new(TerminalPaneRenderCache::default()),

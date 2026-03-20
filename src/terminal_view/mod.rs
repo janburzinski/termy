@@ -1,5 +1,5 @@
-use crate::colors::TerminalColors;
 use crate::chrome_style::ChromeContrastProfile;
+use crate::colors::TerminalColors;
 use crate::commands::{self, CommandAction};
 use crate::config::{
     self, AppConfig, CursorStyle as AppCursorStyle, PaneFocusEffect, TabCloseVisibility,
@@ -40,7 +40,7 @@ use termy_terminal_ui::{
     TerminalGridPaintDamage, TerminalGridRows, TerminalKeyEventKind, TerminalKeyboardMode,
     TerminalMouseMode, TerminalOptions, TerminalQueryColors, TerminalReplyHost,
     TerminalRuntimeConfig, TerminalSize,
-    TmuxLaunchTarget,
+    TmuxLaunchTarget, normalize_working_directory_candidate, resolve_launch_working_directory,
     WorkingDirFallback as RuntimeWorkingDirFallback, find_link_in_line, keystroke_to_input,
 };
 #[cfg(debug_assertions)]
@@ -68,14 +68,14 @@ mod titles;
 #[cfg(target_os = "macos")]
 mod update_toasts;
 
+use self::benchmark::{BENCHMARK_SAMPLE_INTERVAL, BenchmarkConfig, BenchmarkSession};
 use command_palette::{CommandPaletteMode, CommandPaletteState, TmuxSessionIntent};
 use inline_input::{InlineInputAlignment, InlineInputState};
-use overlay_view::TerminalOverlayView;
-use runtime::{RuntimeKind, RuntimeState, TmuxRuntime};
-use self::benchmark::{BENCHMARK_SAMPLE_INTERVAL, BenchmarkConfig, BenchmarkSession};
-pub(crate) use tab_strip::constants::*;
 #[cfg(target_os = "macos")]
 pub(crate) use macos_file_drop::{NativeDropResult, install_native_file_drop};
+use overlay_view::TerminalOverlayView;
+use runtime::{RuntimeKind, RuntimeState, TmuxRuntime};
+pub(crate) use tab_strip::constants::*;
 use tab_strip::state::TabStripState;
 
 const MIN_FONT_SIZE: f32 = 8.0;
@@ -711,6 +711,7 @@ struct TerminalPane {
     top: u16,
     width: u16,
     height: u16,
+    pane_zoom_steps: i16,
     degraded: bool,
     terminal: Terminal,
     render_cache: RefCell<TerminalPaneRenderCache>,
@@ -756,6 +757,30 @@ impl TerminalPaneRenderCache {
         self.display_offset = 0;
         self.key = None;
         self.paint_cache.clear();
+    }
+}
+
+impl TerminalPane {
+    fn new_native(
+        id: String,
+        left: u16,
+        top: u16,
+        width: u16,
+        height: u16,
+        terminal: Terminal,
+    ) -> Self {
+        Self {
+            id,
+            left,
+            top,
+            width,
+            height,
+            pane_zoom_steps: 0,
+            degraded: false,
+            terminal,
+            render_cache: RefCell::new(TerminalPaneRenderCache::default()),
+            last_alternate_screen: Cell::new(false),
+        }
     }
 }
 
@@ -1000,8 +1025,7 @@ fn percentile_millis(samples_micros: &[u32], numerator: usize, denominator: usiz
     let Some(last_index) = samples_micros.len().checked_sub(1) else {
         return 0.0;
     };
-    let rank = (samples_micros.len().saturating_mul(numerator)
-        + denominator.saturating_sub(1))
+    let rank = (samples_micros.len().saturating_mul(numerator) + denominator.saturating_sub(1))
         / denominator;
     let index = rank.saturating_sub(1).min(last_index);
     samples_micros[index] as f32 / 1000.0
@@ -1492,8 +1516,8 @@ pub struct TerminalView {
     pane_resize_drag: Option<PaneResizeDragState>,
     vertical_tab_strip_resize_drag: Option<VerticalTabStripResizeDragState>,
     terminal_scrollbar_marker_cache: TerminalScrollbarMarkerCache,
-    /// Cached cell dimensions
-    cell_size: Option<Size<Pixels>>,
+    /// Cached cell dimensions keyed by font-size bits.
+    cell_size_cache: HashMap<u32, Size<Pixels>>,
     // Search state
     search_open: bool,
     search_input: InlineInputState,
@@ -1629,39 +1653,6 @@ impl TerminalView {
         dirs::home_dir()
     }
 
-    fn resolve_configured_working_directory(configured: Option<&str>) -> Option<PathBuf> {
-        let configured = configured?.trim();
-        if configured.is_empty() {
-            return None;
-        }
-
-        let path = if configured == "~" {
-            Self::user_home_dir()?
-        } else if let Some(relative) = configured
-            .strip_prefix("~/")
-            .or_else(|| configured.strip_prefix("~\\"))
-        {
-            Self::user_home_dir()?.join(relative)
-        } else {
-            PathBuf::from(configured)
-        };
-
-        path.is_dir().then_some(path)
-    }
-
-    fn default_working_directory_with_fallback(
-        fallback: RuntimeWorkingDirFallback,
-    ) -> Option<PathBuf> {
-        if fallback == RuntimeWorkingDirFallback::Home
-            && let Some(home) = Self::user_home_dir()
-            && home.is_dir()
-        {
-            return Some(home);
-        }
-
-        env::current_dir().ok()
-    }
-
     fn display_working_directory_for_prompt(path: &Path) -> String {
         if let Some(home) = Self::user_home_dir() {
             if path == home.as_path() {
@@ -1681,8 +1672,7 @@ impl TerminalView {
         configured_working_dir: Option<&str>,
         fallback: RuntimeWorkingDirFallback,
     ) -> Option<String> {
-        let path = Self::resolve_configured_working_directory(configured_working_dir)
-            .or_else(|| Self::default_working_directory_with_fallback(fallback))?;
+        let path = resolve_launch_working_directory(configured_working_dir, fallback)?;
         Some(Self::display_working_directory_for_prompt(&path))
     }
 
@@ -1811,8 +1801,37 @@ impl TerminalView {
         None
     }
 
-    fn preferred_working_dir_for_new_native_session(
+    fn resolve_preferred_working_directory(
+        explicit_working_dir: Option<&str>,
+        prompt_cwd: Option<&str>,
+        process_cwd: Option<&str>,
+        title_cwd: Option<&str>,
+        configured_working_dir: Option<&str>,
+        fallback: RuntimeWorkingDirFallback,
+    ) -> Option<String> {
+        // Keep tmux and native session creation on the same cwd precedence chain so
+        // new tabs/panes do not drift based on which runtime happens to be active.
+        let explicit_working_dir = normalize_working_directory_candidate(explicit_working_dir);
+        let prompt_cwd = normalize_working_directory_candidate(prompt_cwd);
+        let process_cwd = normalize_working_directory_candidate(process_cwd);
+        let title_cwd = title_cwd
+            .map(str::trim)
+            .filter(|value| Self::looks_like_working_dir_path(value))
+            .and_then(|value| normalize_working_directory_candidate(Some(value)));
+
+        explicit_working_dir
+            .or(prompt_cwd)
+            .or(process_cwd)
+            .or(title_cwd)
+            .or_else(|| {
+                resolve_launch_working_directory(configured_working_dir, fallback)
+                    .map(|path| path.to_string_lossy().into_owned())
+            })
+    }
+
+    fn preferred_working_dir_for_new_session(
         &mut self,
+        explicit_working_dir: Option<&str>,
         cx: &mut Context<Self>,
     ) -> Option<String> {
         let active_tab = self.active_tab;
@@ -1838,14 +1857,17 @@ impl TerminalView {
                 .into_iter()
                 .flatten()
                 .find_map(Self::working_dir_title_candidate)
-                .map(str::to_string)
             })
-            .filter(|candidate| Self::looks_like_working_dir_path(candidate.as_str()));
+            .map(|candidate| candidate.to_string());
 
-        prompt_cwd
-            .or(process_cwd)
-            .or(title_cwd)
-            .or_else(|| self.configured_working_dir.clone())
+        Self::resolve_preferred_working_directory(
+            explicit_working_dir,
+            prompt_cwd.as_deref(),
+            process_cwd.as_deref(),
+            title_cwd.as_deref(),
+            self.configured_working_dir.as_deref(),
+            self.terminal_runtime.working_dir_fallback,
+        )
     }
 
     fn runtime_kind(&self) -> RuntimeKind {
@@ -1889,14 +1911,14 @@ impl TerminalView {
         let pane_id = format!("%native-{tab_id}");
         let pane = TerminalPane {
             id: pane_id.clone(),
-            left: 0,
-            top: 0,
-            width: cols.max(1),
-            height: rows.max(1),
-            degraded: false,
-            terminal,
-            render_cache: RefCell::new(TerminalPaneRenderCache::default()),
-            last_alternate_screen: Cell::new(false),
+            ..TerminalPane::new_native(
+                pane_id.clone(),
+                0,
+                0,
+                cols.max(1),
+                rows.max(1),
+                terminal,
+            )
         };
         TerminalTab {
             id: tab_id,
@@ -1975,7 +1997,8 @@ impl TerminalView {
 
     fn scaled_chrome_neutral_border_alpha(&self, base_alpha: f32) -> f32 {
         scaled_chrome_alpha_for_opacity(
-            self.chrome_contrast_profile().neutral_border_alpha(base_alpha),
+            self.chrome_contrast_profile()
+                .neutral_border_alpha(base_alpha),
             self.effective_background_opacity(),
         )
     }
@@ -2370,6 +2393,13 @@ impl TerminalView {
         pane: &TerminalPane,
         content_bounds: TerminalContentRect,
     ) -> Option<TerminalPaneLayout> {
+        let layout_cell_size = self.layout_cell_size();
+        let layout_cell_width: f32 = layout_cell_size.width.into();
+        let layout_cell_height: f32 = layout_cell_size.height.into();
+        if layout_cell_width <= f32::EPSILON || layout_cell_height <= f32::EPSILON {
+            return None;
+        }
+
         let terminal_size = pane.terminal.size();
         if terminal_size.cols == 0 || terminal_size.rows == 0 {
             return None;
@@ -2384,10 +2414,10 @@ impl TerminalView {
         let (outer_padding_x, outer_padding_y) = self.effective_terminal_padding();
         let (content_padding_x, content_padding_y) = self.native_split_content_padding();
         let frame = TerminalContentRect::new(
-            outer_padding_x + (f32::from(pane.left) * cell_width),
-            outer_padding_y + (f32::from(pane.top) * cell_height),
-            f32::from(pane.width) * cell_width,
-            f32::from(pane.height) * cell_height,
+            outer_padding_x + (f32::from(pane.left) * layout_cell_width),
+            outer_padding_y + (f32::from(pane.top) * layout_cell_height),
+            f32::from(pane.width) * layout_cell_width,
+            f32::from(pane.height) * layout_cell_height,
         )?;
         let content_frame = TerminalContentRect::new(
             frame.origin_x + content_padding_x,
@@ -2414,8 +2444,16 @@ impl TerminalView {
         let extends_right_edge = !multi_pane || pane_right == max_right;
         let extends_bottom_edge = !multi_pane || pane_bottom == max_bottom;
         let scrollbar_surface = TerminalScrollbarSurfaceGeometry::new(
-            if multi_pane { frame.origin_x } else { content_bounds.origin_x },
-            if multi_pane { frame.origin_y } else { content_bounds.origin_y },
+            if multi_pane {
+                frame.origin_x
+            } else {
+                content_bounds.origin_x
+            },
+            if multi_pane {
+                frame.origin_y
+            } else {
+                content_bounds.origin_y
+            },
             if multi_pane && !extends_right_edge {
                 frame.width
             } else if multi_pane {
@@ -2436,8 +2474,8 @@ impl TerminalView {
             frame,
             content_frame,
             scrollbar_surface,
-            cell_width,
-            cell_height,
+            cell_width: layout_cell_width,
+            cell_height: layout_cell_height,
             extends_right_edge,
             extends_bottom_edge,
             gaps,
@@ -2453,24 +2491,27 @@ impl TerminalView {
     }
 
     pub(super) fn terminal_viewport_geometry(&self) -> Option<TerminalViewportGeometry> {
-        let pane = self.active_pane_ref()?;
+        let tab = self.active_tab_ref()?;
+        let pane_index = tab.active_pane_index()?;
+        let pane = tab.panes.get(pane_index)?;
+        let layout_cell_size = self.layout_cell_size();
+        let layout_cell_width: f32 = layout_cell_size.width.into();
+        let layout_cell_height: f32 = layout_cell_size.height.into();
         let size = pane.terminal.size();
-        if size.cols == 0 || size.rows == 0 {
+        if layout_cell_width <= f32::EPSILON
+            || layout_cell_height <= f32::EPSILON
+            || size.cols == 0
+            || size.rows == 0
+        {
             return None;
         }
-
         let (padding_x, padding_y) = self.effective_terminal_padding();
         let (content_padding_x, content_padding_y) = self.native_split_content_padding();
-        let cell_width: f32 = size.cell_width.into();
-        let cell_height: f32 = size.cell_height.into();
-        if cell_width <= f32::EPSILON || cell_height <= f32::EPSILON {
-            return None;
-        }
-
+        let pane_cell_height: f32 = size.cell_height.into();
         Some(TerminalViewportGeometry {
-            origin_x: padding_x + (f32::from(pane.left) * cell_width) + content_padding_x,
-            origin_y: padding_y + (f32::from(pane.top) * cell_height) + content_padding_y,
-            height: cell_height * f32::from(size.rows),
+            origin_x: padding_x + (f32::from(pane.left) * layout_cell_width) + content_padding_x,
+            origin_y: padding_y + (f32::from(pane.top) * layout_cell_height) + content_padding_y,
+            height: pane_cell_height * f32::from(size.rows),
         })
     }
 
@@ -2494,7 +2535,7 @@ impl TerminalView {
         self.tab_bar_visibility = visibility;
         self.clear_pane_render_caches();
         self.clear_terminal_scrollbar_marker_cache();
-        self.cell_size = None;
+        self.cell_size_cache.clear();
         self.mark_tab_strip_layout_dirty();
         true
     }
@@ -2776,7 +2817,8 @@ impl TerminalView {
                 std::process::exit(1);
             }
         };
-        if benchmark_config.is_some() && RuntimeKind::from_app_config(&config) == RuntimeKind::Tmux {
+        if benchmark_config.is_some() && RuntimeKind::from_app_config(&config) == RuntimeKind::Tmux
+        {
             eprintln!("Termy startup blocked: benchmark mode requires native runtime");
             std::process::exit(1);
         }
@@ -2800,7 +2842,9 @@ impl TerminalView {
             configured_working_dir.as_deref(),
             &tab_shell_integration,
             &terminal_runtime,
-            benchmark_config.as_ref().map(|config| config.command.as_str()),
+            benchmark_config
+                .as_ref()
+                .map(|config| config.command.as_str()),
             initial_cols,
             initial_rows,
         );
@@ -2920,7 +2964,7 @@ impl TerminalView {
             pane_resize_drag: None,
             vertical_tab_strip_resize_drag: None,
             terminal_scrollbar_marker_cache: TerminalScrollbarMarkerCache::default(),
-            cell_size: None,
+            cell_size_cache: HashMap::new(),
             search_open: false,
             search_input: InlineInputState::new(String::new()),
             search_state: SearchState::new(),
@@ -3168,7 +3212,7 @@ impl TerminalView {
         if vertical_tabs_changed || vertical_tabs_width_changed || vertical_tabs_minimized_changed {
             self.clear_pane_render_caches();
             self.clear_terminal_scrollbar_marker_cache();
-            self.cell_size = None;
+            self.cell_size_cache.clear();
         }
         let reconnect_managed_tmux = self.runtime_uses_tmux()
             && matches!(
@@ -3188,7 +3232,7 @@ impl TerminalView {
         self.cursor_style = config.cursor_style;
         self.cursor_blink = config.cursor_blink;
         self.cursor_blink_visible = true;
-        self.cell_size = None;
+        self.cell_size_cache.clear();
         if self.font_family != previous_font_family || self.font_size != previous_font_size {
             self.clear_tab_title_width_cache();
             self.mark_tab_strip_layout_dirty();
@@ -3414,8 +3458,9 @@ impl TerminalView {
             for pane_index in 0..self.tabs[index].panes.len() {
                 let pane_id = self.tabs[index].panes[pane_index].id.clone();
                 let pane_is_active = pane_id == active_pane_id;
-                let events =
-                    self.tabs[index].panes[pane_index].terminal.drain_events(&mut reply_host);
+                let events = self.tabs[index].panes[pane_index]
+                    .terminal
+                    .drain_events(&mut reply_host);
 
                 for event in events {
                     match event {
@@ -3523,6 +3568,121 @@ mod tests {
         assert!(!TerminalView::native_exit_should_quit_app(1, 2));
         assert!(!TerminalView::native_exit_should_quit_app(2, 1));
         assert!(!TerminalView::native_exit_should_quit_app(0, 0));
+    }
+
+    #[test]
+    fn preferred_working_directory_prefers_active_sources_before_configured_and_fallback() {
+        let cwd = TerminalView::resolve_preferred_working_directory(
+            None,
+            Some("/prompt"),
+            Some("/process"),
+            Some("/title"),
+            Some("/configured"),
+            RuntimeWorkingDirFallback::Process,
+        );
+        assert_eq!(cwd.as_deref(), Some("/prompt"));
+
+        let cwd = TerminalView::resolve_preferred_working_directory(
+            None,
+            None,
+            Some("/process"),
+            Some("/title"),
+            Some("/configured"),
+            RuntimeWorkingDirFallback::Process,
+        );
+        assert_eq!(cwd.as_deref(), Some("/process"));
+    }
+
+    #[test]
+    fn preferred_working_directory_uses_explicit_value_first() {
+        let cwd = TerminalView::resolve_preferred_working_directory(
+            Some(" /explicit "),
+            Some("/prompt"),
+            Some("/process"),
+            Some("/title"),
+            Some("/configured"),
+            RuntimeWorkingDirFallback::Process,
+        );
+        assert_eq!(cwd.as_deref(), Some("/explicit"));
+    }
+
+    #[test]
+    fn preferred_working_directory_expands_tilde_candidates() {
+        let expected = TerminalView::user_home_dir()
+            .expect("home dir")
+            .to_string_lossy()
+            .into_owned();
+        let cwd = TerminalView::resolve_preferred_working_directory(
+            Some("~"),
+            None,
+            None,
+            None,
+            None,
+            RuntimeWorkingDirFallback::Process,
+        );
+        assert_eq!(cwd.as_deref(), Some(expected.as_str()));
+    }
+
+    #[test]
+    fn preferred_working_directory_uses_configured_before_fallback() {
+        let configured = std::env::current_dir().expect("current dir");
+        let cwd = TerminalView::resolve_preferred_working_directory(
+            None,
+            None,
+            None,
+            None,
+            Some(configured.to_string_lossy().as_ref()),
+            RuntimeWorkingDirFallback::Home,
+        );
+        assert_eq!(cwd.as_deref(), Some(configured.to_string_lossy().as_ref()));
+    }
+
+    #[test]
+    fn invalid_configured_working_directory_falls_back_instead_of_passing_through() {
+        let fallback = std::env::current_dir()
+            .expect("current dir")
+            .to_string_lossy()
+            .into_owned();
+        let cwd = TerminalView::resolve_preferred_working_directory(
+            None,
+            None,
+            None,
+            None,
+            Some("/definitely/not/a/real/termy/path"),
+            RuntimeWorkingDirFallback::Process,
+        );
+        assert_eq!(cwd.as_deref(), Some(fallback.as_str()));
+    }
+
+    #[test]
+    fn attach_resolution_uses_active_working_directory_before_default_launch_dir() {
+        let cwd = TerminalView::resolve_preferred_working_directory(
+            None,
+            Some("/active/project"),
+            None,
+            None,
+            Some("/configured"),
+            RuntimeWorkingDirFallback::Process,
+        );
+        assert_eq!(cwd.as_deref(), Some("/active/project"));
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn unresolved_working_directory_fallback_uses_home_on_macos() {
+        let expected = TerminalView::user_home_dir()
+            .expect("home dir")
+            .to_string_lossy()
+            .into_owned();
+        let cwd = TerminalView::resolve_preferred_working_directory(
+            None,
+            None,
+            None,
+            None,
+            None,
+            RuntimeWorkingDirFallback::Home,
+        );
+        assert_eq!(cwd.as_deref(), Some(expected.as_str()));
     }
 
     #[test]

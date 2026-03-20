@@ -1229,8 +1229,8 @@ impl Drop for SettingsWindow {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use super::test_utils::open_settings_window_handle;
+    use super::*;
     use gpui::TestAppContext;
 
     #[test]
@@ -1280,9 +1280,7 @@ mod tests {
     }
 
     #[gpui::test]
-    fn apply_runtime_config_preserves_out_of_range_vertical_tab_width(
-        cx: &mut TestAppContext,
-    ) {
+    fn apply_runtime_config_preserves_out_of_range_vertical_tab_width(cx: &mut TestAppContext) {
         let settings = open_settings_window_handle(cx);
         settings
             .update(cx, |view, _window, _cx| {
