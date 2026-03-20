@@ -42,11 +42,7 @@ impl TerminalKeyboardMode {
     }
 
     pub fn enhanced_reporting_active(self) -> bool {
-        self.disambiguate_escape_codes
-            || self.report_event_types
-            || self.report_alternate_keys
-            || self.report_all_keys_as_esc
-            || self.report_associated_text
+        self.disambiguate_escape_codes || self.report_event_types || self.report_all_keys_as_esc
     }
 }
 
@@ -85,109 +81,7 @@ fn enhanced_keystroke_to_input(
     event_kind: TerminalKeyEventKind,
     keyboard_mode: TerminalKeyboardMode,
 ) -> Option<Vec<u8>> {
-    if matches!(event_kind, TerminalKeyEventKind::Release) && !keyboard_mode.report_event_types() {
-        return None;
-    }
-
-    let include_event_type = keyboard_mode.report_event_types()
-        && matches!(
-            event_kind,
-            TerminalKeyEventKind::Repeat | TerminalKeyEventKind::Release
-        );
-    if include_event_type
-        && !keyboard_mode.report_all_keys_as_esc()
-        && matches!(keystroke.key.as_str(), "enter" | "tab" | "backspace")
-    {
-        return None;
-    }
-
-    if !should_build_enhanced_sequence(keystroke, event_kind, keyboard_mode) {
-        return None;
-    }
-
-    let modifiers = SequenceModifiers::from_modifiers(keystroke.modifiers);
-    let associated_text = associated_text(keystroke, event_kind, keyboard_mode);
-    let sequence_base = named_special_sequence_base(
-        keystroke,
-        modifiers,
-        associated_text.is_some(),
-        include_event_type,
-    )
-    .or_else(|| modifier_or_control_sequence_base(keystroke, keyboard_mode))
-        .or_else(|| textual_sequence_base(keystroke, keyboard_mode, associated_text.is_some()));
-
-    let SequenceBase { payload, terminator } = sequence_base?;
-
-    let mut sequence = format!("\x1b[{payload}");
-    if include_event_type || !modifiers.is_empty() || associated_text.is_some() {
-        sequence.push_str(&format!(";{}", modifiers.encode_esc_sequence()));
-    }
-
-    if include_event_type {
-        sequence.push(':');
-        let event_code = match event_kind {
-            TerminalKeyEventKind::Press => '1',
-            TerminalKeyEventKind::Repeat => '2',
-            TerminalKeyEventKind::Release => '3',
-        };
-        sequence.push(event_code);
-    }
-
-    if let Some(text) = associated_text {
-        let mut codepoints = text.chars().map(u32::from);
-        if let Some(first) = codepoints.next() {
-            sequence.push_str(&format!(";{first}"));
-        }
-        for codepoint in codepoints {
-            sequence.push_str(&format!(":{codepoint}"));
-        }
-    }
-
-    sequence.push(terminator);
-    Some(sequence.into_bytes())
-}
-
-fn should_build_enhanced_sequence(
-    keystroke: &Keystroke,
-    event_kind: TerminalKeyEventKind,
-    keyboard_mode: TerminalKeyboardMode,
-) -> bool {
-    if keyboard_mode.report_all_keys_as_esc() {
-        return true;
-    }
-
-    if matches!(event_kind, TerminalKeyEventKind::Release) {
-        return keyboard_mode.report_event_types();
-    }
-
-    if is_named_special_key(keystroke.key.as_str()) {
-        return true;
-    }
-
-    if is_modifier_key(keystroke.key.as_str()) {
-        return false;
-    }
-
-    if keyboard_mode.disambiguate_escape_codes()
-        && should_disambiguate_escape_code(keystroke.key.as_str(), keystroke.modifiers)
-    {
-        return true;
-    }
-
-    if is_basic_named_control_key(keystroke.key.as_str()) {
-        return false;
-    }
-
-    let has_plain_text = keystroke
-        .key_char
-        .as_deref()
-        .is_some_and(|text| !text.is_empty())
-        || (keystroke.key.chars().count() == 1
-            && !keystroke.modifiers.control
-            && !keystroke.modifiers.alt
-            && !keystroke.modifiers.platform
-            && !keystroke.modifiers.function);
-    !has_plain_text
+    SequenceBuilder::new(keystroke, event_kind, keyboard_mode).build()
 }
 
 fn should_disambiguate_escape_code(key: &str, modifiers: Modifiers) -> bool {
@@ -210,24 +104,6 @@ fn modifiers_are_empty(modifiers: Modifiers) -> bool {
         && !modifiers.shift
         && !modifiers.platform
         && !modifiers.function
-}
-
-fn associated_text<'a>(
-    keystroke: &'a Keystroke,
-    event_kind: TerminalKeyEventKind,
-    keyboard_mode: TerminalKeyboardMode,
-) -> Option<&'a str> {
-    if !keyboard_mode.report_associated_text()
-        || matches!(event_kind, TerminalKeyEventKind::Release)
-    {
-        return None;
-    }
-
-    let text = keystroke.key_char.as_deref()?;
-    if text.is_empty() || is_control_character(text) {
-        return None;
-    }
-    Some(text)
 }
 
 fn basic_keystroke_to_input(
@@ -304,59 +180,10 @@ fn basic_keystroke_to_input(
     None
 }
 
-fn named_special_sequence_base(
-    keystroke: &Keystroke,
-    modifiers: SequenceModifiers,
-    has_associated_text: bool,
-    include_event_type: bool,
-) -> Option<SequenceBase> {
-    let key = keystroke.key.as_str();
-    let one_based = if modifiers.is_empty() && !has_associated_text && !include_event_type {
-        ""
-    } else {
-        "1"
-    };
-
-    let (payload, terminator) = match key {
-        "pageup" => ("5".to_string(), '~'),
-        "pagedown" => ("6".to_string(), '~'),
-        "delete" => ("3".to_string(), '~'),
-        "insert" => ("2".to_string(), '~'),
-        "home" => (one_based.to_string(), 'H'),
-        "end" => (one_based.to_string(), 'F'),
-        "left" => (one_based.to_string(), 'D'),
-        "right" => (one_based.to_string(), 'C'),
-        "up" => (one_based.to_string(), 'A'),
-        "down" => (one_based.to_string(), 'B'),
-        "f1" => (one_based.to_string(), 'P'),
-        "f2" => (one_based.to_string(), 'Q'),
-        "f3" => (one_based.to_string(), 'R'),
-        "f4" => (one_based.to_string(), 'S'),
-        "f5" => ("15".to_string(), '~'),
-        "f6" => ("17".to_string(), '~'),
-        "f7" => ("18".to_string(), '~'),
-        "f8" => ("19".to_string(), '~'),
-        "f9" => ("20".to_string(), '~'),
-        "f10" => ("21".to_string(), '~'),
-        "f11" => ("23".to_string(), '~'),
-        "f12" => ("24".to_string(), '~'),
-        "f13" => ("25".to_string(), '~'),
-        "f14" => ("26".to_string(), '~'),
-        "f15" => ("28".to_string(), '~'),
-        "f16" => ("29".to_string(), '~'),
-        "f17" => ("31".to_string(), '~'),
-        "f18" => ("32".to_string(), '~'),
-        "f19" => ("33".to_string(), '~'),
-        "f20" => ("34".to_string(), '~'),
-        _ => return None,
-    };
-
-    Some(SequenceBase::new(payload, terminator))
-}
-
 fn modifier_or_control_sequence_base(
     keystroke: &Keystroke,
     keyboard_mode: TerminalKeyboardMode,
+    modifiers: &mut SequenceModifiers,
 ) -> Option<SequenceBase> {
     let payload = match keystroke.key.as_str() {
         "tab" => "9",
@@ -368,25 +195,41 @@ fn modifier_or_control_sequence_base(
             if !keyboard_mode.report_all_keys_as_esc() {
                 return None;
             }
+            modifiers.set(SequenceModifiers::SHIFT, keystroke.modifiers.shift);
             "57447"
         }
         "control" => {
             if !keyboard_mode.report_all_keys_as_esc() {
                 return None;
             }
+            modifiers.set(SequenceModifiers::CONTROL, keystroke.modifiers.control);
             "57448"
         }
         "alt" => {
             if !keyboard_mode.report_all_keys_as_esc() {
                 return None;
             }
+            modifiers.set(SequenceModifiers::ALT, keystroke.modifiers.alt);
             "57449"
         }
         "super" | "cmd" => {
             if !keyboard_mode.report_all_keys_as_esc() {
                 return None;
             }
+            modifiers.set(SequenceModifiers::SUPER, keystroke.modifiers.platform);
             "57450"
+        }
+        "capslock" => {
+            if !keyboard_mode.report_all_keys_as_esc() {
+                return None;
+            }
+            "57358"
+        }
+        "numlock" => {
+            if !keyboard_mode.report_all_keys_as_esc() {
+                return None;
+            }
+            "57360"
         }
         _ => return None,
     };
@@ -401,11 +244,7 @@ fn textual_sequence_base(
 ) -> Option<SequenceBase> {
     if keystroke.key.chars().count() == 1 {
         let ch = keystroke.key.chars().next().unwrap();
-        let unshifted = if keystroke.modifiers.shift {
-            ch.to_lowercase().next().unwrap_or(ch)
-        } else {
-            ch
-        };
+        let unshifted = unshifted_text_character(keystroke, ch);
 
         let unicode_key_code = u32::from(unshifted);
         let alternate_key_code = u32::from(ch);
@@ -427,6 +266,55 @@ fn textual_sequence_base(
     None
 }
 
+fn unshifted_text_character(keystroke: &Keystroke, ch: char) -> char {
+    if keystroke.modifiers.shift {
+        if let Some(unshifted) = ascii_shifted_symbol_base(ch) {
+            return unshifted;
+        }
+
+        return ch.to_lowercase().next().unwrap_or(ch);
+    }
+
+    if let Some(unshifted) = ascii_shifted_symbol_base(ch) {
+        return unshifted;
+    }
+
+    if ch.is_ascii_uppercase() {
+        return ch.to_ascii_lowercase();
+    }
+
+    ch
+}
+
+fn ascii_shifted_symbol_base(ch: char) -> Option<char> {
+    // GPUI does not expose the pre-shift key for symbol keys, so recover the
+    // common ASCII base here to keep kitty report-all sequences unambiguous.
+    Some(match ch {
+        '!' => '1',
+        '@' => '2',
+        '#' => '3',
+        '$' => '4',
+        '%' => '5',
+        '^' => '6',
+        '&' => '7',
+        '*' => '8',
+        '(' => '9',
+        ')' => '0',
+        '_' => '-',
+        '+' => '=',
+        '{' => '[',
+        '}' => ']',
+        '|' => '\\',
+        ':' => ';',
+        '"' => '\'',
+        '<' => ',',
+        '>' => '.',
+        '?' => '/',
+        '~' => '`',
+        _ => return None,
+    })
+}
+
 fn is_control_character(text: &str) -> bool {
     let codepoint = text.bytes().next().unwrap();
     text.len() == 1 && (codepoint < 0x20 || (0x7f..=0x9f).contains(&codepoint))
@@ -434,42 +322,6 @@ fn is_control_character(text: &str) -> bool {
 
 fn is_basic_named_control_key(key: &str) -> bool {
     matches!(key, "tab" | "enter" | "escape" | "backspace" | "space")
-}
-
-fn is_named_special_key(key: &str) -> bool {
-    matches!(
-        key,
-        "delete"
-            | "insert"
-            | "home"
-            | "end"
-            | "left"
-            | "right"
-            | "up"
-            | "down"
-            | "pageup"
-            | "pagedown"
-            | "f1"
-            | "f2"
-            | "f3"
-            | "f4"
-            | "f5"
-            | "f6"
-            | "f7"
-            | "f8"
-            | "f9"
-            | "f10"
-            | "f11"
-            | "f12"
-            | "f13"
-            | "f14"
-            | "f15"
-            | "f16"
-            | "f17"
-            | "f18"
-            | "f19"
-            | "f20"
-    )
 }
 
 fn is_modifier_key(key: &str) -> bool {
@@ -566,6 +418,256 @@ impl SequenceBase {
     }
 }
 
+struct SequenceBuilder<'a> {
+    keystroke: &'a Keystroke,
+    event_kind: TerminalKeyEventKind,
+    keyboard_mode: TerminalKeyboardMode,
+    modifiers: SequenceModifiers,
+    include_event_type: bool,
+    associated_text: Option<&'a str>,
+}
+
+impl<'a> SequenceBuilder<'a> {
+    fn new(
+        keystroke: &'a Keystroke,
+        event_kind: TerminalKeyEventKind,
+        keyboard_mode: TerminalKeyboardMode,
+    ) -> Self {
+        let include_event_type = keyboard_mode.report_event_types()
+            && matches!(
+                event_kind,
+                TerminalKeyEventKind::Repeat | TerminalKeyEventKind::Release
+            );
+
+        Self {
+            keystroke,
+            event_kind,
+            keyboard_mode,
+            modifiers: SequenceModifiers::from_modifiers(keystroke.modifiers),
+            include_event_type,
+            associated_text: associated_text(keystroke, event_kind, keyboard_mode),
+        }
+    }
+
+    fn build(mut self) -> Option<Vec<u8>> {
+        if matches!(self.event_kind, TerminalKeyEventKind::Release)
+            && !self.keyboard_mode.report_event_types()
+        {
+            return None;
+        }
+
+        if self.include_event_type
+            && !self.keyboard_mode.report_all_keys_as_esc()
+            && matches!(self.keystroke.key.as_str(), "enter" | "tab" | "backspace")
+        {
+            return None;
+        }
+
+        if !self.should_build() {
+            return None;
+        }
+
+        let SequenceBase { payload, terminator } = self
+            .try_build_named()
+            .or_else(|| self.try_build_control_char_or_mod())
+            .or_else(|| self.try_build_textual())?;
+
+        let mut sequence = format!("\x1b[{payload}");
+        if self.include_event_type || !self.modifiers.is_empty() || self.associated_text.is_some() {
+            sequence.push_str(&format!(";{}", self.modifiers.encode_esc_sequence()));
+        }
+
+        if self.include_event_type {
+            sequence.push(':');
+            let event_code = match self.event_kind {
+                TerminalKeyEventKind::Press => '1',
+                TerminalKeyEventKind::Repeat => '2',
+                TerminalKeyEventKind::Release => '3',
+            };
+            sequence.push(event_code);
+        }
+
+        if let Some(text) = self.associated_text {
+            let mut codepoints = text.chars().map(u32::from);
+            if let Some(first) = codepoints.next() {
+                sequence.push_str(&format!(";{first}"));
+            }
+            for codepoint in codepoints {
+                sequence.push_str(&format!(":{codepoint}"));
+            }
+        }
+
+        sequence.push(terminator);
+        Some(sequence.into_bytes())
+    }
+
+    fn should_build(&self) -> bool {
+        if self.keyboard_mode.report_all_keys_as_esc() {
+            return true;
+        }
+
+        if matches!(self.event_kind, TerminalKeyEventKind::Release) {
+            return self.keyboard_mode.report_event_types();
+        }
+
+        if named_sequence_key(self.keystroke.key.as_str()).is_some() {
+            return true;
+        }
+
+        if is_modifier_key(self.keystroke.key.as_str()) {
+            return false;
+        }
+
+        if self.keyboard_mode.disambiguate_escape_codes()
+            && should_disambiguate_escape_code(self.keystroke.key.as_str(), self.keystroke.modifiers)
+        {
+            return true;
+        }
+
+        if is_basic_named_control_key(self.keystroke.key.as_str()) {
+            return false;
+        }
+
+        let has_plain_text = self
+            .keystroke
+            .key_char
+            .as_deref()
+            .is_some_and(|text| !text.is_empty())
+            || (self.keystroke.key.chars().count() == 1
+                && !self.keystroke.modifiers.control
+                && !self.keystroke.modifiers.alt
+                && !self.keystroke.modifiers.platform
+                && !self.keystroke.modifiers.function);
+        !has_plain_text
+    }
+
+    fn try_build_named(&self) -> Option<SequenceBase> {
+        named_sequence_key(self.keystroke.key.as_str()).map(|named_sequence| {
+            named_sequence.sequence_base(
+                self.modifiers,
+                self.associated_text.is_some(),
+                self.include_event_type,
+            )
+        })
+    }
+
+    fn try_build_control_char_or_mod(&mut self) -> Option<SequenceBase> {
+        modifier_or_control_sequence_base(self.keystroke, self.keyboard_mode, &mut self.modifiers)
+    }
+
+    fn try_build_textual(&self) -> Option<SequenceBase> {
+        textual_sequence_base(
+            self.keystroke,
+            self.keyboard_mode,
+            self.associated_text.is_some(),
+        )
+    }
+}
+
+fn associated_text<'a>(
+    keystroke: &'a Keystroke,
+    event_kind: TerminalKeyEventKind,
+    keyboard_mode: TerminalKeyboardMode,
+) -> Option<&'a str> {
+    if !keyboard_mode.report_associated_text()
+        || matches!(event_kind, TerminalKeyEventKind::Release)
+    {
+        return None;
+    }
+
+    let text = keystroke.key_char.as_deref()?;
+    if text.is_empty() || is_control_character(text) {
+        return None;
+    }
+    Some(text)
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum NamedSequenceKey {
+    OneBased(char),
+    Tilde(&'static str),
+    Kitty(&'static str, char),
+}
+
+impl NamedSequenceKey {
+    fn sequence_base(
+        self,
+        modifiers: SequenceModifiers,
+        has_associated_text: bool,
+        include_event_type: bool,
+    ) -> SequenceBase {
+        match self {
+            Self::OneBased(terminator) => {
+                let payload = if modifiers.is_empty() && !has_associated_text && !include_event_type
+                {
+                    String::new()
+                } else {
+                    "1".to_string()
+                };
+                SequenceBase::new(payload, terminator)
+            }
+            Self::Tilde(payload) => SequenceBase::new(payload.to_string(), '~'),
+            Self::Kitty(payload, terminator) => SequenceBase::new(payload.to_string(), terminator),
+        }
+    }
+}
+
+fn named_sequence_key(key: &str) -> Option<NamedSequenceKey> {
+    Some(match key {
+        "pageup" => NamedSequenceKey::Tilde("5"),
+        "pagedown" => NamedSequenceKey::Tilde("6"),
+        "delete" => NamedSequenceKey::Tilde("3"),
+        "insert" => NamedSequenceKey::Tilde("2"),
+        "home" => NamedSequenceKey::OneBased('H'),
+        "end" => NamedSequenceKey::OneBased('F'),
+        "left" => NamedSequenceKey::OneBased('D'),
+        "right" => NamedSequenceKey::OneBased('C'),
+        "up" => NamedSequenceKey::OneBased('A'),
+        "down" => NamedSequenceKey::OneBased('B'),
+        "f1" => NamedSequenceKey::OneBased('P'),
+        "f2" => NamedSequenceKey::OneBased('Q'),
+        // F3 diverges from the legacy xterm table in kitty mode.
+        "f3" => NamedSequenceKey::Kitty("13", '~'),
+        "f4" => NamedSequenceKey::OneBased('S'),
+        "f5" => NamedSequenceKey::Tilde("15"),
+        "f6" => NamedSequenceKey::Tilde("17"),
+        "f7" => NamedSequenceKey::Tilde("18"),
+        "f8" => NamedSequenceKey::Tilde("19"),
+        "f9" => NamedSequenceKey::Tilde("20"),
+        "f10" => NamedSequenceKey::Tilde("21"),
+        "f11" => NamedSequenceKey::Tilde("23"),
+        "f12" => NamedSequenceKey::Tilde("24"),
+        "f13" => NamedSequenceKey::Kitty("57376", 'u'),
+        "f14" => NamedSequenceKey::Kitty("57377", 'u'),
+        "f15" => NamedSequenceKey::Kitty("57378", 'u'),
+        "f16" => NamedSequenceKey::Kitty("57379", 'u'),
+        "f17" => NamedSequenceKey::Kitty("57380", 'u'),
+        "f18" => NamedSequenceKey::Kitty("57381", 'u'),
+        "f19" => NamedSequenceKey::Kitty("57382", 'u'),
+        "f20" => NamedSequenceKey::Kitty("57383", 'u'),
+        "f21" => NamedSequenceKey::Kitty("57384", 'u'),
+        "f22" => NamedSequenceKey::Kitty("57385", 'u'),
+        "f23" => NamedSequenceKey::Kitty("57386", 'u'),
+        "f24" => NamedSequenceKey::Kitty("57387", 'u'),
+        "f25" => NamedSequenceKey::Kitty("57388", 'u'),
+        "f26" => NamedSequenceKey::Kitty("57389", 'u'),
+        "f27" => NamedSequenceKey::Kitty("57390", 'u'),
+        "f28" => NamedSequenceKey::Kitty("57391", 'u'),
+        "f29" => NamedSequenceKey::Kitty("57392", 'u'),
+        "f30" => NamedSequenceKey::Kitty("57393", 'u'),
+        "f31" => NamedSequenceKey::Kitty("57394", 'u'),
+        "f32" => NamedSequenceKey::Kitty("57395", 'u'),
+        "f33" => NamedSequenceKey::Kitty("57396", 'u'),
+        "f34" => NamedSequenceKey::Kitty("57397", 'u'),
+        "f35" => NamedSequenceKey::Kitty("57398", 'u'),
+        "scrolllock" => NamedSequenceKey::Kitty("57359", 'u'),
+        "printscreen" => NamedSequenceKey::Kitty("57361", 'u'),
+        "pause" => NamedSequenceKey::Kitty("57362", 'u'),
+        "menu" => NamedSequenceKey::Kitty("57363", 'u'),
+        _ => return None,
+    })
+}
+
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 struct SequenceModifiers(u8);
 
@@ -599,6 +701,14 @@ impl SequenceModifiers {
     fn is_empty(self) -> bool {
         self.0 == 0
     }
+
+    fn set(&mut self, flag: u8, enabled: bool) {
+        if enabled {
+            self.0 |= flag;
+        } else {
+            self.0 &= !flag;
+        }
+    }
 }
 
 #[cfg(test)]
@@ -625,6 +735,13 @@ mod tests {
         TerminalKeyboardMode {
             report_all_keys_as_esc: true,
             report_event_types: true,
+            ..TerminalKeyboardMode::default()
+        }
+    }
+
+    fn disambiguate_mode() -> TerminalKeyboardMode {
+        TerminalKeyboardMode {
+            disambiguate_escape_codes: true,
             ..TerminalKeyboardMode::default()
         }
     }
@@ -673,10 +790,7 @@ mod tests {
             keystroke_to_input(
                 &keystroke("left", None, modifiers),
                 TerminalKeyEventKind::Press,
-                TerminalKeyboardMode {
-                    disambiguate_escape_codes: true,
-                    ..TerminalKeyboardMode::default()
-                },
+                disambiguate_mode(),
                 true,
             ),
             Some(b"\x1b[1;9D".to_vec())
@@ -753,6 +867,99 @@ mod tests {
                 true,
             ),
             Some(vec![0x14])
+        );
+    }
+
+    #[test]
+    fn kitty_mode_reports_f3_with_protocol_sequence() {
+        assert_eq!(
+            keystroke_to_input(
+                &keystroke("f3", None, Modifiers::default()),
+                TerminalKeyEventKind::Press,
+                disambiguate_mode(),
+                true,
+            ),
+            Some(b"\x1b[13~".to_vec())
+        );
+    }
+
+    #[test]
+    fn kitty_mode_reports_high_function_keys_with_private_use_codes() {
+        assert_eq!(
+            keystroke_to_input(
+                &keystroke("f13", None, Modifiers::default()),
+                TerminalKeyEventKind::Press,
+                disambiguate_mode(),
+                true,
+            ),
+            Some(b"\x1b[57376u".to_vec())
+        );
+        assert_eq!(
+            keystroke_to_input(
+                &keystroke("f24", None, Modifiers::default()),
+                TerminalKeyEventKind::Press,
+                disambiguate_mode(),
+                true,
+            ),
+            Some(b"\x1b[57387u".to_vec())
+        );
+    }
+
+    #[test]
+    fn report_all_mode_uses_unshifted_ascii_base_for_shifted_symbols() {
+        assert_eq!(
+            keystroke_to_input(
+                &keystroke("!", Some("!"), Modifiers::default()),
+                TerminalKeyEventKind::Press,
+                report_all_mode(),
+                true,
+            ),
+            Some(b"\x1b[49u".to_vec())
+        );
+    }
+
+    #[test]
+    fn report_alternate_keys_includes_shifted_symbol_alternate_code() {
+        assert_eq!(
+            keystroke_to_input(
+                &keystroke("!", Some("!"), Modifiers::default()),
+                TerminalKeyEventKind::Press,
+                TerminalKeyboardMode {
+                    report_all_keys_as_esc: true,
+                    report_alternate_keys: true,
+                    ..TerminalKeyboardMode::default()
+                },
+                true,
+            ),
+            Some(b"\x1b[49:33u".to_vec())
+        );
+    }
+
+    #[test]
+    fn augment_only_flags_do_not_force_kitty_sequences() {
+        assert_eq!(
+            keystroke_to_input(
+                &keystroke("left", None, Modifiers::default()),
+                TerminalKeyEventKind::Press,
+                TerminalKeyboardMode {
+                    report_alternate_keys: true,
+                    ..TerminalKeyboardMode::default()
+                },
+                true,
+            ),
+            Some(b"\x1b[D".to_vec())
+        );
+        assert_eq!(
+            keystroke_to_input(
+                &keystroke("a", Some("a"), Modifiers::default()),
+                TerminalKeyEventKind::Press,
+                TerminalKeyboardMode {
+                    report_associated_text: true,
+                    ..TerminalKeyboardMode::default()
+                },
+                true,
+            ),
+            Some(b"a".to_vec())
         );
     }
 }

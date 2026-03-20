@@ -1602,6 +1602,14 @@ mod tests {
     }
 
     #[test]
+    fn keyboard_mode_augment_only_flags_do_not_activate_enhanced_reporting() {
+        let mode = keyboard_mode(TermMode::REPORT_ALTERNATE_KEYS | TermMode::REPORT_ASSOCIATED_TEXT);
+        assert!(mode.report_alternate_keys());
+        assert!(mode.report_associated_text());
+        assert!(!mode.enhanced_reporting_active());
+    }
+
+    #[test]
     fn env_overrides_set_term_by_default() {
         let env = pty_env_overrides(None, &TerminalRuntimeConfig::default());
         assert_eq!(env.get("TERM").map(String::as_str), Some(DEFAULT_TERM));
