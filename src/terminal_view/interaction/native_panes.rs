@@ -294,6 +294,7 @@ mod tests {
             top,
             width,
             height,
+            pane_zoom_steps: 0,
             degraded: false,
             terminal: test_terminal(),
             render_cache: RefCell::new(TerminalPaneRenderCache::default()),
